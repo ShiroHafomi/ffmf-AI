@@ -1,11 +1,41 @@
 {
   "version": 1,
   "skills": {
+    "claude-api": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/claude-api/SKILL.md",
+      "computedHash": "d7848cf69221dc3edce871768ae8dc3914331b4f8af47dd88aa0eedeb29d12c7"
+    },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "github",
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "nestjs-expert": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/nestjs-expert/SKILL.md",
+      "computedHash": "24253ac233d644a504ba5f2847af7d87bf25c9beb03b16bbbaf952e431865c83"
+    },
+    "python-pro": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/python-pro/SKILL.md",
+      "computedHash": "bfd83668264345dfa519e5d8f339c64ac7d2b883748d85a26015781e9338fcc9"
+    },
+    "security-reviewer": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/security-reviewer/SKILL.md",
+      "computedHash": "cca56045dd49c756546d74d46034c91be2159875e358050d40c7d1905700e8fd"
+    },
+    "sql-pro": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/sql-pro/SKILL.md",
+      "computedHash": "9e885b2dde7c91ec9026191e1f5b2c6216d28ed14b13dfc830c7721c15a89012"
     }
   }
 }

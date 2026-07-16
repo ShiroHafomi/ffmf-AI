@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes.predict import router as predict_router
+from routes.insights import router as insights_router
 
 # Tải biến môi trường từ file .env (CORS_ORIGINS) trước khi đọc config
 load_dotenv()
@@ -42,6 +43,7 @@ app.add_middleware(
 
 # Đăng ký router
 app.include_router(predict_router)
+app.include_router(insights_router)
 
 
 @app.get("/")

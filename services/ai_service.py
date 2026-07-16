@@ -179,3 +179,160 @@ def analyze_categories(
         "suggestions": suggestions,
         "total_budget": total_budget,
     }
+
+
+def detect_anomalies(
+    data: list[dict], amount_key: str = "total_expense", rel_threshold: float = 1.8
+) -> list[dict]:
+    """Phát hiện các tháng chi tiêu bất thường.
+
+    Dùng trung vị (median) làm tâm và cờ các tháng lệch quá `rel_threshold`
+    lần so với trung vị (ví dụ 1.8 => cao hơn 80% hoặc thấp hơn 80% so với
+    mức điển hình). Median bền vững hơn mean/std khi có outlier cực đoan
+    (một tháng lỗi dữ liệu giá trị khổng lồ sẽ kéo mean/std lên và làm
+    z-score trở nên vô nghĩa).
+    """
+    if len(data) < 3:
+        return []
+
+    totals = [float(row[amount_key]) for row in data]
+    median = float(np.median(totals))
+    # Nếu mọi giá trị đều <= 0, không thể tính tỷ lệ -> bỏ qua.
+    if median <= 0:
+        return []
+
+    anomalies = []
+    for row in data:
+        amt = float(row[amount_key])
+        if amt > median * rel_threshold or amt < median / rel_threshold:
+            direction = "high" if amt > median else "low"
+            deviation = round((amt - median) / median * 100, 1)
+            anomalies.append(
+                {
+                    "month": f"{int(row['yr'])}-{int(row['month']):02d}",
+                    "amount": round(amt, 2),
+                    "median": round(median, 2),
+                    "deviation_percent": deviation,
+                    "direction": direction,
+                }
+            )
+
+    # Sắp xếp: bất thường cao trước, sau đó theo |deviation| giảm dần.
+    anomalies.sort(key=lambda a: (a["direction"] != "high", -abs(a["deviation_percent"])))
+    return anomalies
+
+
+def generate_savings_advice(
+    predicted_expense: float,
+    predicted_income: float | None,
+    budget: float | None,
+) -> dict:
+    """Dự phóng tiết kiệm ròng (thu - chi) và đưa ra lời khuyên."""
+
+    # Không có dữ liệu thu nhập → chỉ cảnh báo dựa trên ngân sách.
+    if predicted_income is None:
+        if budget is not None and predicted_expense > budget:
+            return {
+                "surplus": None,
+                "status": "over_budget",
+                "tip": (
+                    f"Chi tiêu dự kiến {predicted_expense:,.0f} vượt ngân sách "
+                    f"{budget:,.0f}. Hãy cắt giảm chi tiêu không thiết yếu để "
+                    "giữ đúng kế hoạch."
+                ),
+            }
+        return {
+            "surplus": None,
+            "status": "no_budget",
+            "tip": "Thiết lập ngân sách hàng tháng để có mục tiêu tiết kiệm cụ thể.",
+        }
+
+    surplus = round(predicted_income - predicted_expense, 2)
+
+    if surplus > 0:
+        pct = round(surplus / predicted_income * 100, 1)
+        status = "surplus"
+        tip = (
+            f"Dự phóng thặng dư {surplus:,.0f} ({pct}% thu nhập). Hãy tự động "
+            "hóa tiết kiệm hoặc đầu tư khoản này thay vì để không."
+        )
+    elif surplus == 0:
+        status = "break_even"
+        tip = "Thu nhập và chi tiêu dự kiến hòa vốn. Hãy xây dựng quỹ dự phòng cho các chi phí bất ngờ."
+    else:
+        deficit = abs(surplus)
+        status = "deficit"
+        tip = (
+            f"Dự phóng thâm hụt {deficit:,.0f}. Xem lại các chi phí cố định hoặc "
+            "tìm nguồn thu thêm để không phải dùng đến tiền tiết kiệm."
+        )
+
+    return {"surplus": surplus, "status": status, "tip": tip}
+
+
+def recommend_actions(
+    analysis: dict,
+    category_analysis: dict,
+    anomalies: list[dict],
+    savings: dict,
+) -> list[dict]:
+    """Tổng hợp các hành động được khuyến nghị theo thứ tự ưu tiên."""
+
+    actions: list[dict] = []
+
+    if analysis.get("status") == "abnormal":
+        actions.append(
+            {
+                "type": "spending_spike",
+                "priority": "high",
+                "text": analysis.get("suggestion", ""),
+            }
+        )
+    if analysis.get("status") == "warning":
+        actions.append(
+            {
+                "type": "budget",
+                "priority": "high",
+                "text": analysis.get("suggestion", ""),
+            }
+        )
+
+    for cat in category_analysis.get("overspent_categories", []):
+        actions.append(
+            {
+                "type": "category_overspend",
+                "priority": "medium",
+                "text": (
+                    f"{cat['name']} vượt ngân sách {cat['over_amount']:,.0f} "
+                    f"({cat['budget_usage']}% đã dùng)."
+                ),
+            }
+        )
+
+    for a in anomalies:
+        if a["direction"] == "high":
+            actions.append(
+                {
+                    "type": "anomaly",
+                    "priority": "medium",
+                    "text": f"Chi tiêu bất thường cao {a['amount']:,.0f} vào tháng {a['month']} (lệch {a['deviation_percent']}% so với mức điển hình).",
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "type": "anomaly",
+                    "priority": "medium",
+                    "text": f"Chi tiêu bất thường thấp {a['amount']:,.0f} vào tháng {a['month']} (lệch {a['deviation_percent']}% so với mức điển hình).",
+                }
+            )
+
+    if savings.get("status") == "deficit":
+        actions.append({"type": "savings", "priority": "high", "text": savings.get("tip", "")})
+    elif savings.get("status") == "surplus":
+        actions.append({"type": "savings", "priority": "low", "text": savings.get("tip", "")})
+
+    # Ưu tiên: high -> medium -> low
+    order = {"high": 0, "medium": 1, "low": 2}
+    actions.sort(key=lambda x: order.get(x["priority"], 3))
+    return actions

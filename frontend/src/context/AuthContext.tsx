@@ -16,6 +16,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   authFetch: <T = any>(
     path: string,
     opts?: { method?: string; body?: unknown },
@@ -30,16 +31,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return;
+    // We already hold an access token in memory — validate it and load the user.
+    if (token) {
+      let active = true;
+      (async () => {
+        const r = await apiFetch<{ user: User }>('/api/auth/me', { token });
+        if (active) {
+          if (r.ok) setUser(r.data.user);
+          else setToken(null);
+          setLoading(false);
+        }
+      })();
+      return () => {
+        active = false;
+      };
     }
+
+    // No in-memory token (e.g. the page was reloaded). Restore the session so
+    // the user isn't silently logged out: first try sessionStorage, then fall
+    // back to the httpOnly refresh cookie via /api/auth/refresh.
     let active = true;
     (async () => {
-      const r = await apiFetch<{ user: User }>('/api/auth/me', { token });
+      const stored = sessionStorage.getItem('ffms_token');
+      if (stored) {
+        const r = await apiFetch<{ user: User }>('/api/auth/me', { token: stored });
+        if (active) {
+          if (r.ok) setToken(stored);
+          else sessionStorage.removeItem('ffms_token');
+          setLoading(false);
+        }
+        return;
+      }
+
+      const rf = await apiFetch<{ accessToken: string; user: User }>(
+        '/api/auth/refresh',
+        { method: 'POST' },
+      );
       if (active) {
-        if (r.ok) setUser(r.data.user);
-        else setToken(null);
+        if (rf.ok && rf.data.accessToken) {
+          sessionStorage.setItem('ffms_token', rf.data.accessToken);
+          setToken(rf.data.accessToken);
+          setUser(rf.data.user ?? null);
+        }
         setLoading(false);
       }
     })();
@@ -54,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       { method: 'POST', body: { email, password } },
     );
     if (!r.ok) throw new Error((r.data as any)?.error ?? 'Login failed');
+    sessionStorage.setItem('ffms_token', r.data.accessToken);
     setToken(r.data.accessToken);
     setUser(r.data.user);
   }
@@ -64,14 +98,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       { method: 'POST', body: { email, password, name } },
     );
     if (!r.ok) throw new Error((r.data as any)?.error ?? 'Registration failed');
+    sessionStorage.setItem('ffms_token', r.data.accessToken);
     setToken(r.data.accessToken);
     setUser(r.data.user);
   }
 
   async function doLogout() {
     await apiFetch('/api/auth/logout', { method: 'POST' });
+    sessionStorage.removeItem('ffms_token');
     setToken(null);
     setUser(null);
+  }
+
+  async function refreshUser() {
+    if (!token) return;
+    const r = await apiFetch<{ user: User }>('/api/auth/me', { token });
+    if (r.ok) setUser(r.data.user);
   }
 
   async function authFetch<T = any>(
@@ -86,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (rf.ok && rf.data.accessToken) {
         t = rf.data.accessToken;
+        sessionStorage.setItem('ffms_token', t);
         setToken(t);
         r = await apiFetch<T>(path, { ...opts, token: t });
       }
@@ -102,6 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login: doLogin,
         register: doRegister,
         logout: doLogout,
+        refreshUser,
         authFetch,
       }}
     >
