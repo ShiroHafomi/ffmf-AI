@@ -1,57 +1,30 @@
-<<<<<<< HEAD
-"""Dự đoán chi tiêu bằng Linear Regression và phân tích kết quả."""
-=======
 """Dự đoán chi tiêu bằng Linear Regression và phân tích kết quả chi tiết."""
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
 
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
 
-<<<<<<< HEAD
-def predict_next_month(expenses: list[dict]) -> float:
-    """Dùng Linear Regression dự đoán chi tiêu tháng tiếp theo."""
+def predict_next_month(data: list[dict], amount_key: str = "total_expense") -> float:
+    """Dùng Linear Regression dự đoán dữ liệu tháng tiếp theo."""
 
-    # Tổng chi tiêu theo thứ tự thời gian (đã sắp xếp giảm dần từ DB,
-    # nên đảo lại để cũ -> mới).
-    totals = np.array(
-        [float(row["total_expense"]) for row in reversed(expenses)]
-    )
+    # Chuyển dữ liệu sang numpy array
+    totals = np.array([float(row[amount_key]) for row in data])
 
     # Dùng chỉ số tuần tự 0,1,2,... làm trục X thay vì tháng lịch (1-12).
     # Tránh lỗi tháng = 13 khi qua năm mới và giữ xu hướng đúng khi dữ liệu
     # trải qua nhiều năm.
     X = np.arange(len(totals)).reshape(-1, 1)
-=======
-def predict_next_month(data: list[dict], amount_key: str = "total_expense") -> float:
-    """Dùng Linear Regression dự đoán dữ liệu tháng tiếp theo."""
-
-    # Chuyển dữ liệu sang numpy array
-    months = np.array([row["month"] for row in data])
-    totals = np.array([float(row[amount_key]) for row in data])
-
-    # Reshape X thành 2D
-    X = months.reshape(-1, 1)
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
     y = totals
 
     # Huấn luyện mô hình
     model = LinearRegression()
     model.fit(X, y)
 
-<<<<<<< HEAD
     # Dự đoán điểm tiếp theo (chỉ số = số tháng đã có)
     next_idx = len(totals)
     predicted = model.predict(np.array([[next_idx]]))[0]
 
     return round(float(predicted), 2)
-=======
-    # Dự đoán tháng tiếp theo
-    next_month = int(months[-1]) + 1
-    predicted = model.predict(np.array([[next_month]]))[0]
-
-    return round(predicted, 2)
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
 
 
 def analyze(predicted: float, last_month: float, budget: float | None) -> dict:
@@ -86,8 +59,6 @@ def analyze(predicted: float, last_month: float, budget: float | None) -> dict:
         "message": message,
         "suggestion": suggestion,
     }
-<<<<<<< HEAD
-=======
 
 
 def analyze_income(predicted: float, last_month: float) -> dict:
@@ -160,7 +131,7 @@ def analyze_categories(
 
             if spent > budget:
                 overspent.append(cat_info)
-        
+
         # Danh mục chiếm > 30% tổng chi tiêu
         if pct_of_total > 30:
             high_spend.append(cat_info)
@@ -208,4 +179,3 @@ def analyze_categories(
         "suggestions": suggestions,
         "total_budget": total_budget,
     }
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983

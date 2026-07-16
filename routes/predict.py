@@ -2,13 +2,19 @@
 
 from fastapi import APIRouter, HTTPException
 
-<<<<<<< HEAD
-from services.db_service import get_monthly_expenses, get_latest_budget
-from services.ai_service import predict_next_month, analyze
-=======
-from services.db_service import get_monthly_expenses, get_latest_budget, get_category_expenses, get_category_budgets, get_monthly_incomes
-from services.ai_service import predict_next_month, analyze, analyze_categories, analyze_income
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
+from services.db_service import (
+    get_monthly_expenses,
+    get_latest_budget,
+    get_category_expenses,
+    get_category_budgets,
+    get_monthly_incomes,
+)
+from services.ai_service import (
+    predict_next_month,
+    analyze,
+    analyze_categories,
+    analyze_income,
+)
 
 router = APIRouter()
 
@@ -43,15 +49,6 @@ def predict(household_id: int):
     except ConnectionError as e:
         raise HTTPException(status_code=500, detail=f"Lỗi kết nối database: {e}")
 
-<<<<<<< HEAD
-    # Bước 5: Chạy AI dự đoán
-    predicted = predict_next_month(expenses)
-    last_month = float(expenses[-1]["total_expense"])
-
-    # Bước 6: Phân tích và trả kết quả
-    analysis = analyze(predicted, last_month, budget)
-
-=======
     # Bước 5: Chạy AI dự đoán chi tiêu
     predicted = predict_next_month(expenses, amount_key="total_expense")
     last_month = float(expenses[-1]["total_expense"])
@@ -61,7 +58,7 @@ def predict(household_id: int):
         incomes = get_monthly_incomes(household_id)
     except ConnectionError as e:
         incomes = []
-    
+
     predicted_income = None
     last_month_income = None
     income_analysis = {}
@@ -77,11 +74,14 @@ def predict(household_id: int):
     # Bước 7: Phân tích danh mục
     category_expenses = get_category_expenses(household_id)
     category_budgets = get_category_budgets(household_id)
-    
-    current_month_total = sum([float(c["total"]) for c in category_expenses]) if category_expenses else 0
-    category_analysis = analyze_categories(category_expenses, category_budgets, current_month_total)
 
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
+    current_month_total = (
+        sum(float(c["total"]) for c in category_expenses) if category_expenses else 0
+    )
+    category_analysis = analyze_categories(
+        category_expenses, category_budgets, current_month_total
+    )
+
     return {
         "predicted": predicted,
         "last_month": last_month,
@@ -90,8 +90,6 @@ def predict(household_id: int):
         "status": analysis["status"],
         "message": analysis["message"],
         "suggestion": analysis["suggestion"],
-<<<<<<< HEAD
-=======
         "category_analysis": category_analysis,
         "predicted_income": predicted_income,
         "last_month_income": last_month_income,
@@ -99,5 +97,4 @@ def predict(household_id: int):
         "income_status": income_analysis.get("status"),
         "income_message": income_analysis.get("message"),
         "income_suggestion": income_analysis.get("suggestion"),
->>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
     }
