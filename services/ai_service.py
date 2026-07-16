@@ -7,23 +7,27 @@ from sklearn.linear_model import LinearRegression
 def predict_next_month(expenses: list[dict]) -> float:
     """Dùng Linear Regression dự đoán chi tiêu tháng tiếp theo."""
 
-    # Chuyển dữ liệu sang numpy array
-    months = np.array([row["month"] for row in expenses])
-    totals = np.array([float(row["total_expense"]) for row in expenses])
+    # Tổng chi tiêu theo thứ tự thời gian (đã sắp xếp giảm dần từ DB,
+    # nên đảo lại để cũ -> mới).
+    totals = np.array(
+        [float(row["total_expense"]) for row in reversed(expenses)]
+    )
 
-    # Reshape X thành 2D
-    X = months.reshape(-1, 1)
+    # Dùng chỉ số tuần tự 0,1,2,... làm trục X thay vì tháng lịch (1-12).
+    # Tránh lỗi tháng = 13 khi qua năm mới và giữ xu hướng đúng khi dữ liệu
+    # trải qua nhiều năm.
+    X = np.arange(len(totals)).reshape(-1, 1)
     y = totals
 
     # Huấn luyện mô hình
     model = LinearRegression()
     model.fit(X, y)
 
-    # Dự đoán tháng tiếp theo
-    next_month = int(months[-1]) + 1
-    predicted = model.predict(np.array([[next_month]]))[0]
+    # Dự đoán điểm tiếp theo (chỉ số = số tháng đã có)
+    next_idx = len(totals)
+    predicted = model.predict(np.array([[next_idx]]))[0]
 
-    return round(predicted, 2)
+    return round(float(predicted), 2)
 
 
 def analyze(predicted: float, last_month: float, budget: float | None) -> dict:
