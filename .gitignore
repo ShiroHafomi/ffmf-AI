@@ -26,4 +26,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+<<<<<<< HEAD
 .aider*
+=======
+>>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983

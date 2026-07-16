@@ -1,5 +1,6 @@
 """Kết nối MySQL cho hệ thống FFMS."""
 
+<<<<<<< HEAD
 import os
 
 from dotenv import load_dotenv
@@ -16,6 +17,17 @@ DB_CONFIG = {
     "user": os.getenv("DB_USER", "root"),
     "password": os.getenv("DB_PASSWORD", ""),
     "database": os.getenv("DB_NAME", "ffms"),
+=======
+import mysql.connector
+from mysql.connector import Error
+
+# Cấu hình database
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "root",
+    "password": "Phuoc123!",
+    "database": "ffms",
+>>>>>>> 2b0250f1149757761cb81a6118d9931d67d1c983
 }
 
 
