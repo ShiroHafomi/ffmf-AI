@@ -23,7 +23,17 @@ def get_connection():
     """Tạo và trả về kết nối MySQL."""
     try:
         connection = mysql.connector.connect(**DB_CONFIG)
-        if connection.is_connected():
-            return connection
     except Error as e:
         raise ConnectionError(f"Không thể kết nối MySQL: {e}")
+
+    # connect() may succeed but hand back a dead connection; treat that as a
+    # failure so callers get a clean ConnectionError (which the routes catch)
+    # instead of a confusing AttributeError downstream.
+    if not connection.is_connected():
+        try:
+            connection.close()
+        except Exception:
+            pass
+        raise ConnectionError("Không thể kết nối MySQL: kết nối không khả dụng")
+
+    return connection

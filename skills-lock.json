@@ -7,6 +7,24 @@
       "skillPath": "skills/claude-api/SKILL.md",
       "computedHash": "d7848cf69221dc3edce871768ae8dc3914331b4f8af47dd88aa0eedeb29d12c7"
     },
+    "finance-skills": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "finance/skills/finance-skills/SKILL.md",
+      "computedHash": "341ddedbe836d94c5d205beb081614a89d7c5fbc5f194b47e8ea621a186f21ac"
+    },
+    "fix": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "engineering-team/playwright-pro/skills/fix/SKILL.md",
+      "computedHash": "528892a60829bf2444a479b026482ead9a8ecd1c5b53218682f20cbe9220ea75"
+    },
+    "focused-fix": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "engineering/skills/focused-fix/SKILL.md",
+      "computedHash": "5a4d6e024f6091c41157c5d80c1235f39609dc99ef78971008a3a113bb8a5002"
+    },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "github",
@@ -19,11 +37,29 @@
       "skillPath": "skills/nestjs-expert/SKILL.md",
       "computedHash": "24253ac233d644a504ba5f2847af7d87bf25c9beb03b16bbbaf952e431865c83"
     },
+    "presentation-structure": {
+      "source": "shanraisshan/claude-code-best-practice",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/presentation/presentation-structure/SKILL.md",
+      "computedHash": "98eea5d5e4b7a3492d9400a2b64ab544dee7272d94d4937a1f79e3fd408647c9"
+    },
+    "presentation-styling": {
+      "source": "shanraisshan/claude-code-best-practice",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/presentation/presentation-styling/SKILL.md",
+      "computedHash": "887dbdeb277aa15e938c914056daec50e597dba94791567d84c3dcd28b07e476"
+    },
     "python-pro": {
       "source": "jeffallan/claude-skills",
       "sourceType": "github",
       "skillPath": "skills/python-pro/SKILL.md",
       "computedHash": "bfd83668264345dfa519e5d8f339c64ac7d2b883748d85a26015781e9338fcc9"
+    },
+    "rag-architect": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/rag-architect/SKILL.md",
+      "computedHash": "d4b6aa4c5db4c92c993a1607c745c57d263414773afa3225bf0f80a95f138067"
     },
     "security-reviewer": {
       "source": "jeffallan/claude-skills",
@@ -31,11 +67,41 @@
       "skillPath": "skills/security-reviewer/SKILL.md",
       "computedHash": "cca56045dd49c756546d74d46034c91be2159875e358050d40c7d1905700e8fd"
     },
+    "shopify-expert": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/shopify-expert/SKILL.md",
+      "computedHash": "2a8d7c2b2ede902e76cd70a78b2bf7b19a5a36cf0266d48a5bc44096c6dde095"
+    },
     "sql-pro": {
       "source": "jeffallan/claude-skills",
       "sourceType": "github",
       "skillPath": "skills/sql-pro/SKILL.md",
       "computedHash": "9e885b2dde7c91ec9026191e1f5b2c6216d28ed14b13dfc830c7721c15a89012"
+    },
+    "time-skill": {
+      "source": "shanraisshan/claude-code-best-practice",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/time-skill/SKILL.md",
+      "computedHash": "19bc67b91ff386e980e083d77274ce088abb0e2064fb08550cb22f7c348e593e"
+    },
+    "vibe-to-agentic-framework": {
+      "source": "shanraisshan/claude-code-best-practice",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/presentation/vibe-to-agentic-framework/SKILL.md",
+      "computedHash": "a8f8e36d990dec703158933faa52bb5771e551f27adbca2d39a324aa3bf1e4fd"
+    },
+    "weather-fetcher": {
+      "source": "shanraisshan/claude-code-best-practice",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/weather-fetcher/SKILL.md",
+      "computedHash": "2474588044fb126946884f7cf7c751228c5993c58d9845ab17182b29b7a9962c"
+    },
+    "weather-svg-creator": {
+      "source": "shanraisshan/claude-code-best-practice",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/weather-svg-creator/SKILL.md",
+      "computedHash": "d923fa900089313c508376e613a992b008739d038b2bfa3c0e895263b7f18991"
     }
   }
 }

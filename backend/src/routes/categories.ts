@@ -1,11 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { authGuard } from '../middleware/auth';
+import { requireCapability } from '../authz/authorize';
 import { findUserById } from '../services/userService';
 import { listCategories, createCategory } from '../services/categoryService';
 
 const router = Router();
 
-router.get('/', authGuard, async (req: Request, res: Response) => {
+router.get('/', requireCapability('category.view'), async (req: Request, res: Response) => {
   try {
     const user = await findUserById(req.userId!);
     if (!user || !user.household_id) {
@@ -18,7 +18,7 @@ router.get('/', authGuard, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/', authGuard, async (req: Request, res: Response) => {
+router.post('/', requireCapability('category.manage'), async (req: Request, res: Response) => {
   try {
     const user = await findUserById(req.userId!);
     if (!user || !user.household_id) {

@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -17,7 +18,7 @@ interface AuthContextValue {
   register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
-  authFetch: <T = any>(
+  authFetch: <T = unknown>(
     path: string,
     opts?: { method?: string; body?: unknown },
   ) => Promise<{ ok: boolean; status: number; data: T }>;
@@ -86,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       '/api/auth/login',
       { method: 'POST', body: { email, password } },
     );
-    if (!r.ok) throw new Error((r.data as any)?.error ?? 'Login failed');
+    if (!r.ok) throw new Error((r.data as { error?: string })?.error ?? 'Login failed');
     sessionStorage.setItem('ffms_token', r.data.accessToken);
     setToken(r.data.accessToken);
     setUser(r.data.user);
@@ -97,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       '/api/auth/register',
       { method: 'POST', body: { email, password, name } },
     );
-    if (!r.ok) throw new Error((r.data as any)?.error ?? 'Registration failed');
+    if (!r.ok) throw new Error((r.data as { error?: string })?.error ?? 'Registration failed');
     sessionStorage.setItem('ffms_token', r.data.accessToken);
     setToken(r.data.accessToken);
     setUser(r.data.user);
@@ -116,25 +117,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (r.ok) setUser(r.data.user);
   }
 
-  async function authFetch<T = any>(
-    path: string,
-    opts: { method?: string; body?: unknown } = {},
-  ) {
-    let t = token;
-    let r = await apiFetch<T>(path, { ...opts, token: t });
-    if (r.status === 401) {
-      const rf = await apiFetch<{ accessToken: string }>('/api/auth/refresh', {
-        method: 'POST',
-      });
-      if (rf.ok && rf.data.accessToken) {
-        t = rf.data.accessToken;
-        sessionStorage.setItem('ffms_token', t);
-        setToken(t);
-        r = await apiFetch<T>(path, { ...opts, token: t });
+  const authFetch = useCallback(
+    async function authFetch<T = unknown>(
+      path: string,
+      opts: { method?: string; body?: unknown } = {},
+    ): Promise<{ ok: boolean; status: number; data: T }> {
+      let t = token;
+      let r = await apiFetch<T>(path, { ...opts, token: t });
+      if (r.status === 401) {
+        const rf = await apiFetch<{ accessToken: string }>('/api/auth/refresh', {
+          method: 'POST',
+        });
+        if (rf.ok && rf.data.accessToken) {
+          t = rf.data.accessToken;
+          sessionStorage.setItem('ffms_token', t);
+          setToken(t);
+          r = await apiFetch<T>(path, { ...opts, token: t });
+        }
       }
-    }
-    return r;
-  }
+      return r;
+    },
+    [token, setToken],
+  );
 
   return (
     <AuthContext.Provider

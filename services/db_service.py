@@ -7,12 +7,13 @@ from db.connection import get_connection
 
 def get_monthly_expenses(household_id: int) -> list[dict]:
     """Lấy tổng chi tiêu theo tháng (tối đa 6 tháng gần nhất, cũ -> mới)."""
-    # Lấy kết nối TRƯỚC try để tránh NameError trong finally
-    # nếu get_connection() ném lỗi.
-    connection = get_connection()
+    # Khởi tạo None trước try: nếu get_connection() ném lỗi thì `connection`
+    # vẫn được gán (None) và khối finally không bắn NameError.
+    connection = None
     cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
         # Tổng chi tiêu nhóm theo NĂM + THÁNG, sắp xếp tăng dần
@@ -23,7 +24,7 @@ def get_monthly_expenses(household_id: int) -> list[dict]:
                 YEAR(expense_date)  AS yr,
                 MONTH(expense_date) AS month,
                 SUM(amount)         AS total_expense
-            FROM EXPENSES
+            FROM expenses
             WHERE household_id = %s
             GROUP BY yr, month
             ORDER BY yr ASC, month ASC
@@ -35,19 +36,20 @@ def get_monthly_expenses(household_id: int) -> list[dict]:
         return results
 
     finally:
-        # Đóng kết nối
-        if connection.is_connected():
-            if cursor:
+        # Đóng kết nối (chỉ khi đã mở thành công)
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
                 cursor.close()
             connection.close()
 
 
 def get_monthly_incomes(household_id: int) -> list[dict]:
     """Lấy tổng thu nhập theo tháng (tối đa 6 tháng gần nhất, cũ -> mới)."""
-    connection = get_connection()
+    connection = None
     cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
         # Tổng thu nhập nhóm theo NĂM + THÁNG, sắp xếp tăng dần.
@@ -56,7 +58,7 @@ def get_monthly_incomes(household_id: int) -> list[dict]:
                 YEAR(income_date)   AS yr,
                 MONTH(income_date)  AS month,
                 SUM(amount)         AS total_income
-            FROM INCOMES
+            FROM incomes
             WHERE household_id = %s
             GROUP BY yr, month
             ORDER BY yr ASC, month ASC
@@ -68,8 +70,8 @@ def get_monthly_incomes(household_id: int) -> list[dict]:
         return results
 
     finally:
-        if connection.is_connected():
-            if cursor:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
                 cursor.close()
             connection.close()
 
@@ -81,18 +83,21 @@ def get_latest_budget(household_id: int) -> float | None:
     tháng. Hàm này cộng gộp (SUM) tất cả các khoản đó của tháng mới nhất
     thay vì chỉ lấy 1 dòng bất kỳ.
     """
-    connection = get_connection()
+    connection = None
     cursor = None
 
     try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
         # Tìm (năm, tháng) mới nhất của hộ, sau đó cộng gộp toàn bộ
         # ngân sách của tháng đó.
         query = """
             SELECT SUM(b.amount) AS amount
-            FROM BUDGETS b
+            FROM budgets b
             JOIN (
                 SELECT year, month
-                FROM BUDGETS
+                FROM budgets
                 WHERE household_id = %s
                 ORDER BY year DESC, month DESC
                 LIMIT 1
@@ -102,14 +107,13 @@ def get_latest_budget(household_id: int) -> float | None:
             WHERE b.household_id = %s
         """
 
-        cursor = connection.cursor(dictionary=True)
         cursor.execute(query, (household_id, household_id))
         result = cursor.fetchone()
         return float(result["amount"]) if result and result["amount"] is not None else None
 
     finally:
-        if connection.is_connected():
-            if cursor:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
                 cursor.close()
             connection.close()
 
@@ -121,10 +125,11 @@ def get_category_expenses(household_id: int, month: int = None, year: int = None
     if year is None:
         year = datetime.now().year
 
-    connection = get_connection()
+    connection = None
     cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
         query = """
@@ -146,23 +151,58 @@ def get_category_expenses(household_id: int, month: int = None, year: int = None
         return results
 
     finally:
-        if connection.is_connected():
-            if cursor:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
                 cursor.close()
             connection.close()
 
 
-def get_category_budgets(household_id: int, month: int = None, year: int = None) -> list[dict]:
+def get_monthly_category_expenses(
+    household_id: int, months: int = 6
+) -> list[dict]:
+    """Lấy tổng chi tiêu theo danh mục + tháng (6 tháng gần nhất) để dự báo
+    theo danh mục. Gom nhóm theo danh mục, năm, tháng."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = """
+            SELECT
+                COALESCE(c.name, 'Other') AS category_name,
+                YEAR(e.expense_date)  AS yr,
+                MONTH(e.expense_date) AS month,
+                SUM(e.amount)         AS total
+            FROM expenses e
+            LEFT JOIN categories c ON e.category_id = c.id
+            WHERE e.household_id = %s
+              AND e.expense_date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
+            GROUP BY c.name, yr, month
+            ORDER BY yr ASC, month ASC
+        """
+        cursor.execute(query, (household_id, int(months)))
+        return cursor.fetchall()
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def get_category_budgets(
+    household_id: int, month: int = None, year: int = None
+) -> list[dict]:
     """Lấy ngân sách theo danh mục của tháng hiện tại."""
     if month is None:
         month = datetime.now().month
     if year is None:
         year = datetime.now().year
 
-    connection = get_connection()
+    connection = None
     cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
         query = """
@@ -181,7 +221,7 @@ def get_category_budgets(household_id: int, month: int = None, year: int = None)
         return results
 
     finally:
-        if connection.is_connected():
-            if cursor:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
                 cursor.close()
             connection.close()

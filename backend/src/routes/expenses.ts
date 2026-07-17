@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { authGuard } from '../middleware/auth';
+import { requireCapability } from '../authz/authorize';
 import { findUserById } from '../services/userService';
 import { categoryExists } from '../services/categoryService';
 import { listExpenses, createExpense } from '../services/expenseService';
 
 const router = Router();
 
-router.get('/', authGuard, async (req: Request, res: Response) => {
+router.get('/', requireCapability('expense.view'), async (req: Request, res: Response) => {
   try {
     const user = await findUserById(req.userId!);
     if (!user || !user.household_id) {
@@ -20,7 +20,7 @@ router.get('/', authGuard, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/', authGuard, async (req: Request, res: Response) => {
+router.post('/', requireCapability('expense.create'), async (req: Request, res: Response) => {
   try {
     const user = await findUserById(req.userId!);
     if (!user || !user.household_id) {
@@ -62,6 +62,34 @@ router.post('/', authGuard, async (req: Request, res: Response) => {
       expenseDate,
     });
     return res.status(201).json({ id });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// CSV export of the household's expenses (read-only, respects capability).
+router.get('/export', requireCapability('expense.view'), async (req: Request, res: Response) => {
+  try {
+    const user = await findUserById(req.userId!);
+    if (!user || !user.household_id) {
+      return res.status(400).json({ error: 'You need a household first' });
+    }
+    const expenses = await listExpenses(user.household_id, 1000);
+    const header = 'id,date,category,description,amount\n';
+    const rows = expenses
+      .map((e) =>
+        [
+          e.id,
+          e.expense_date,
+          (e.category_name ?? '').replace(/[,\n]/g, ' '),
+          (e.description ?? '').replace(/[,\n]/g, ' '),
+          e.amount,
+        ].join(','),
+      )
+      .join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="expenses.csv"');
+    return res.status(200).send(header + rows + '\n');
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { logger } from '../utils/logger';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(
@@ -7,6 +8,6 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ) {
-  console.error(err);
+  logger.error('Unhandled error:', err?.stack ?? err?.message ?? err);
   res.status(err.status ?? 500).json({ error: err.message ?? 'Internal server error' });
 }

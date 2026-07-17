@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { authGuard } from '../middleware/auth';
+import { requireCapability } from '../authz/authorize';
 import { findUserById } from '../services/userService';
-import { getCurrentBudgets, setMonthlyBudget } from '../services/budgetService';
+import { getCurrentBudgets, setMonthlyBudget, getCategoryBreakdown, suggestCutbacks, evaluateAlertThresholds, parseCategoryThresholds } from '../services/budgetService';
 import { monthlyTotal } from '../services/expenseService';
 
 const router = Router();
 
-router.get('/', authGuard, async (req: Request, res: Response) => {
+router.get('/', requireCapability('budget.view'), async (req: Request, res: Response) => {
   try {
     const user = await findUserById(req.userId!);
     if (!user || !user.household_id) {
@@ -35,7 +35,7 @@ router.get('/', authGuard, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/', authGuard, async (req: Request, res: Response) => {
+router.post('/', requireCapability('budget.manage'), async (req: Request, res: Response) => {
   try {
     const user = await findUserById(req.userId!);
     if (!user || !user.household_id) {
@@ -51,6 +51,45 @@ router.post('/', authGuard, async (req: Request, res: Response) => {
     const year = now.getFullYear();
     const id = await setMonthlyBudget(user.household_id, amt, month, year);
     return res.status(201).json({ id, amount: amt, month, year });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Cut-back suggestions + per-lever alert thresholds (per-request params).
+//   ?threshold=80             -> alert every lever above 80% of its budget
+//   &category_thresholds=Food:80,Groceries:90  -> per-lever overrides
+router.get('/suggestions', requireCapability('budget.view'), async (req: Request, res: Response) => {
+  try {
+    const user = await findUserById(req.userId!);
+    if (!user || !user.household_id) {
+      return res.status(400).json({ error: 'You need a household first' });
+    }
+    const now = new Date();
+    const month = Number(req.query.month ?? now.getMonth() + 1);
+    const year = Number(req.query.year ?? now.getFullYear());
+    const threshold = Number(req.query.threshold ?? 80);
+    const defaultThreshold = Number.isFinite(threshold) ? threshold : 80;
+
+    const breakdown = await getCategoryBreakdown(user.household_id, month, year);
+    const cutbacks = suggestCutbacks(breakdown);
+    const perLever = parseCategoryThresholds(
+      typeof req.query.category_thresholds === 'string'
+        ? req.query.category_thresholds
+        : undefined,
+    );
+    const alerts = evaluateAlertThresholds(breakdown, perLever, defaultThreshold);
+
+    return res.json({
+      month,
+      year,
+      cutback_suggestions: cutbacks,
+      alert_thresholds: {
+        default_threshold: defaultThreshold,
+        per_lever_thresholds: perLever,
+        result: alerts,
+      },
+    });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }

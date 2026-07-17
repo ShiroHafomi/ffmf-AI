@@ -15,6 +15,7 @@ import {
   deleteRefreshToken,
 } from '../services/tokenService';
 import { config } from '../config';
+import { logger } from '../utils/logger';
 
 function setRefreshCookie(res: Response, token: string) {
   res.cookie('refresh_token', token, {
@@ -34,6 +35,7 @@ function publicUser(u: PublicUser) {
     full_name: u.full_name,
     role_id: u.role_id,
     household_id: u.household_id,
+    household_role: u.household_role ?? null,
     status: u.status,
   };
 }
@@ -58,6 +60,7 @@ export async function register(req: Request, res: Response) {
     setRefreshCookie(res, refresh);
     return res.status(201).json({ accessToken: access, user: publicUser(user!) });
   } catch (e: any) {
+    logger.error('register failed:', e?.message ?? e);
     return res.status(500).json({ error: e.message ?? 'registration failed' });
   }
 }
@@ -78,6 +81,7 @@ export async function login(req: Request, res: Response) {
     setRefreshCookie(res, refresh);
     return res.json({ accessToken: access, user: publicUser(user) });
   } catch (e: any) {
+    logger.error('login failed:', e?.message ?? e);
     return res.status(500).json({ error: e.message ?? 'login failed' });
   }
 }

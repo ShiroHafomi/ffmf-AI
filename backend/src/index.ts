@@ -10,6 +10,8 @@ import householdsRouter from './routes/households';
 import categoriesRouter from './routes/categories';
 import expensesRouter from './routes/expenses';
 import budgetsRouter from './routes/budgets';
+import adminRouter from './routes/admin';
+import goalsRouter from './routes/goals';
 import { errorHandler } from './middleware/error';
 
 const app = express();
@@ -33,6 +35,8 @@ app.use('/api/households', householdsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/expenses', expensesRouter);
 app.use('/api/budgets', budgetsRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/goals', goalsRouter);
 
 app.use(errorHandler);
 

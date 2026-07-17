@@ -4,6 +4,7 @@ Chạy: python -m uvicorn main:app --reload --port 8000
 """
 
 import os
+import logging
 
 from dotenv import load_dotenv
 
@@ -16,12 +17,26 @@ from routes.insights import router as insights_router
 # Tải biến môi trường từ file .env (CORS_ORIGINS) trước khi đọc config
 load_dotenv()
 
-# Khởi tạo ứng dụng FastAPI
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("ffms")
+
+
+# Khởi tạo ứng dụng FastAPI (phải định nghĩa trước các decorator @app.*)
 app = FastAPI(
     title="FFMS AI Microservice",
     description="Dự đoán chi tiêu bằng AI cho hệ thống quản lý tài chính gia đình",
-  version="1.0.0",
+    version="1.0.0",
 )
+
+
+@app.get("/")
+def root():
+    """Kiểm tra service đang hoạt động."""
+    return {"status": "ok", "service": "FFMS Test api"}
+
 
 # Cấu hình CORS.
 # LƯU Ý: không dùng allow_origins=["*"] cùng allow_credentials=True
@@ -44,9 +59,3 @@ app.add_middleware(
 # Đăng ký router
 app.include_router(predict_router)
 app.include_router(insights_router)
-
-
-@app.get("/")
-def root():
-    """Kiểm tra service đang hoạt động."""
-    return {"status": "ok", "service": "FFMS Test api"}

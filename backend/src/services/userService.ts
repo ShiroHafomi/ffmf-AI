@@ -11,6 +11,7 @@ export interface UserRow {
   household_id: number | null;
   status: number;
   password_hash: string;
+  household_role?: string | null;
 }
 
 export type PublicUser = Omit<UserRow, 'password_hash'>;
@@ -26,8 +27,12 @@ export async function findUserByEmail(email: string): Promise<UserRow | null> {
 
 export async function findUserById(id: number): Promise<PublicUser | null> {
   const [rows] = await pool.execute<any[]>(
-    'SELECT id, email, full_name, name, role_id, household_id, status ' +
-      'FROM users WHERE id = ?',
+    `SELECT u.id, u.email, u.full_name, u.name, u.role_id, u.household_id, u.status,
+            hm.role AS household_role
+     FROM users u
+     LEFT JOIN household_members hm
+       ON hm.user_id = u.id AND hm.household_id = u.household_id
+     WHERE u.id = ?`,
     [id],
   );
   return (rows[0] as PublicUser) ?? null;
