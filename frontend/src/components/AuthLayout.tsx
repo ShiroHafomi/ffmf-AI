@@ -3,6 +3,7 @@
 import { type ReactNode } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { LogoMark } from "@/components/ui/Icon";
 
 const FEATURES = [
   {
@@ -34,7 +35,7 @@ export default function AuthLayout({
   const year = new Date().getFullYear();
 
   return (
-    <div className="flex min-h-screen bg-ink-50">
+    <div className="flex min-h-screen bg-ink-50 dark:bg-ink-50">
       {/* Hero panel */}
       <aside className="relative hidden w-1/2 flex-col justify-between overflow-hidden p-10 text-white lg:flex xl:p-14">
         <div className="brand-gradient absolute inset-0" />
@@ -47,9 +48,7 @@ export default function AuthLayout({
         />
         <div className="relative flex items-center gap-2.5">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/15 backdrop-blur">
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 13h4v8H3zM10 8h4v13h-4zM17 3h4v18h-4z" />
-            </svg>
+            <LogoMark className="h-6 w-6" />
           </span>
           <span className="text-lg font-bold tracking-tight">FFMS</span>
         </div>
@@ -87,20 +86,18 @@ export default function AuthLayout({
           <div className="mb-6 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 lg:hidden">
               <span className="grid h-9 w-9 place-items-center rounded-xl brand-gradient text-white">
-                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 13h4v8H3zM10 8h4v13h-4zM17 3h4v18h-4z" />
-                </svg>
+                <LogoMark className="h-5 w-5" />
               </span>
-              <span className="text-lg font-bold text-ink-900">FFMS</span>
+              <span className="text-lg font-bold text-ink-900 dark:text-ink-50">FFMS</span>
             </div>
             <LanguageSwitcher className="ml-auto" />
           </div>
           <div className="card card-pad">
-            <h2 className="text-2xl font-semibold text-ink-900">{title}</h2>
-            <p className="mb-6 mt-1 text-sm text-ink-500">{subtitle}</p>
+            <h2 className="text-2xl font-semibold text-ink-900 dark:text-ink-50">{title}</h2>
+            <p className="mb-6 mt-1 text-sm text-ink-500 dark:text-ink-400">{subtitle}</p>
             {children}
           </div>
-          <p className="mt-4 text-center text-sm text-ink-500">{footer}</p>
+          <p className="mt-4 text-center text-sm text-ink-500 dark:text-ink-400">{footer}</p>
         </div>
       </main>
     </div>

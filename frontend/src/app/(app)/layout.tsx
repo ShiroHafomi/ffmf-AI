@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { HouseholdDataProvider } from "@/context/HouseholdDataContext";
 import AppShell from "@/components/AppShell";
+import CommandPalette from "@/components/CommandPalette";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -18,7 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (loading || !user) {
     return (
-      <div className="grid min-h-screen place-items-center bg-ink-50">
+      <div className="grid min-h-screen place-items-center bg-ink-50 dark:bg-ink-50">
         <div className="flex items-center gap-3 text-ink-400">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-ink-300 border-t-brand-600" />
           <span className="text-sm">{t("common.loading")}</span>
@@ -30,6 +31,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <HouseholdDataProvider>
       <AppShell>{children}</AppShell>
+      <CommandPalette />
     </HouseholdDataProvider>
   );
 }

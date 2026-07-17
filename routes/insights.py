@@ -4,8 +4,10 @@ Tập hợp dự đoán (RAG), phân tích danh mục, phát hiện bất thư�
 tiết kiệm và các hành động được khuyến nghị vào một response duy nhất.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
 
+from services.limiter import limiter, DEFAULT_LIMIT
 from services.db_service import (
     get_monthly_expenses,
     get_latest_budget,
@@ -26,7 +28,7 @@ from services.ai_service import (
     evaluate_alert_thresholds,
     forecast_category_breakdown,
 )
-from typing import Optional
+from services.validation import validate_household_id, validate_threshold
 
 router = APIRouter()
 
@@ -48,12 +50,18 @@ def _parse_category_thresholds(raw: str | None) -> dict[str, float]:
 
 
 @router.get("/insights/{household_id}")
+@limiter.limit(DEFAULT_LIMIT)
 def insights(
+    request: Request,
     household_id: int,
     threshold: float = 80,
     category_thresholds: Optional[str] = None,
 ):
     """Tổng hợp toàn bộ phân tích tài chính cho hộ gia đình."""
+
+    # Bảo mật: validate đầu vào trước khi truy vấn DB.
+    validate_household_id(household_id)
+    threshold = validate_threshold(threshold)
 
     # Bước 1: Dữ liệu chi tiêu theo tháng
     try:

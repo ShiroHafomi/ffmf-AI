@@ -1,7 +1,9 @@
 """API dự đoán chi tiêu — GET /predict/{household_id}"""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
 
+from services.limiter import limiter, DEFAULT_LIMIT
 from services.db_service import (
     get_monthly_expenses,
     get_latest_budget,
@@ -17,18 +19,24 @@ from services.ai_service import (
     suggest_cutbacks,
     evaluate_alert_thresholds,
 )
-from typing import Optional
+from services.validation import validate_household_id, validate_threshold
 
 router = APIRouter()
 
 
 @router.get("/predict/{household_id}")
+@limiter.limit(DEFAULT_LIMIT)
 def predict(
+    request: Request,
     household_id: int,
     threshold: float = 80,
     category_thresholds: Optional[str] = None,
 ):
     """Dự đoán tổng chi tiêu tháng tiếp theo cho hộ gia đình (RAG + fallback)."""
+
+    # Bảo mật: validate đầu vào trước khi truy vấn DB.
+    validate_household_id(household_id)
+    threshold = validate_threshold(threshold)
 
     # Bước 1: Lấy dữ liệu chi tiêu
     try:

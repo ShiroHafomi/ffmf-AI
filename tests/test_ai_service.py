@@ -20,9 +20,10 @@ def _monthly(values):
 
 
 # --- predict_next_month (RAG, falls back to linear regression) ------------
-def test_predict_fallback_uses_linear_regression():
-    # No ANTHROPIC_API_KEY in the test env -> deterministic LR fallback.
+def test_predict_fallback_uses_linear_regression(monkeypatch):
+    # Deterministic-only mode -> no LLM call (always free, offline-safe).
     # 100,200,300 -> slope 100 -> next = 400
+    monkeypatch.setenv("LLM_PROVIDER", "deterministic")
     pred = predict_next_month(_monthly([100, 200, 300]))
     assert pred["predicted"] == 400.0
     assert pred["method"] == "fallback_linear_regression"
@@ -113,11 +114,12 @@ def test_rag_uses_valid_tool_choice_shape(monkeypatch):
             return _Resp()
 
     class _Client:
-        def __init__(self, *a, **k):
+        def __init__(self, *_args, **_kwargs):
             self.messages = _Messages()
 
     import anthropic
 
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setattr(anthropic, "Anthropic", _Client)
 

@@ -224,6 +224,57 @@ export const translations: Record<Locale, Dict> = {
     "goals.addBtn": "Add goal",
     "goals.reached": "reached",
     "goals.ofTarget": "of target",
+
+    /* theme */
+    "theme.label": "Appearance",
+    "theme.light": "Light",
+    "theme.dark": "Dark",
+    "theme.system": "System",
+    "theme.followSystem": "Match my system setting",
+
+    /* command palette */
+    "cmd.open": "Open command palette",
+    "cmd.title": "Command palette",
+    "cmd.placeholder": "Search pages and actions…",
+    "cmd.groupNav": "Go to",
+    "cmd.groupActions": "Actions",
+    "cmd.toggleTheme": "Toggle light / dark",
+    "cmd.noResults": "No matches found",
+
+    /* settings */
+    "nav.settings": "Settings",
+    "settings.title": "Settings",
+    "settings.subtitle": "Your profile and preferences",
+    "settings.profile": "Profile",
+    "settings.name": "Name",
+    "settings.email": "Email",
+    "settings.role": "Role",
+    "settings.household": "Household",
+    "settings.householdName": "Household name",
+    "settings.appearance": "Appearance",
+    "settings.language": "Language",
+    "settings.logout": "Log out",
+    "settings.logoutConfirm": "Log out of FFMS?",
+    "settings.signedInAs": "Signed in as",
+
+    /* search + period */
+    "common.search": "Search",
+    "common.searchPlaceholder": "Search expenses…",
+    "ins.period": "Period",
+    "ins.period3": "3 mo",
+    "ins.period6": "6 mo",
+    "ins.period12": "12 mo",
+    "ins.categoryMix": "Spending by category",
+    "ins.categoryMixSub": "Share of total spend this period",
+
+    /* toasts */
+    "toast.expenseAdded": "Expense added",
+    "toast.budgetSaved": "Budget saved",
+    "toast.goalAdded": "Goal added",
+    "toast.householdCreated": "Household created",
+    "toast.memberAdded": "Member added",
+    "toast.roleUpdated": "Role updated",
+    "toast.loadError": "Couldn't load data",
   },
 
   vi: {
@@ -436,6 +487,56 @@ export const translations: Record<Locale, Dict> = {
     "goals.addBtn": "Thêm mục tiêu",
     "goals.reached": "đã đạt",
     "goals.ofTarget": "của mục tiêu",
+
+    /* theme */
+    "theme.label": "Giao diện",
+    "theme.light": "Sáng",
+    "theme.dark": "Tối",
+    "theme.system": "Hệ thống",
+    "theme.followSystem": "Theo cài đặt hệ thống",
+
+    /* command palette */
+    "cmd.open": "Mở bảng lệnh",
+    "cmd.title": "Bảng lệnh",
+    "cmd.placeholder": "Tìm trang và thao tác…",
+    "cmd.groupNav": "Đến",
+    "cmd.groupActions": "Thao tác",
+    "cmd.toggleTheme": "Chuyển sáng / tối",
+    "cmd.noResults": "Không tìm thấy kết quả",
+
+    /* settings */
+    "nav.settings": "Cài đặt",
+    "settings.title": "Cài đặt",
+    "settings.subtitle": "Hồ sơ và tùy chọn của bạn",
+    "settings.profile": "Hồ sơ",
+    "settings.name": "Tên",
+    "settings.email": "Email",
+    "settings.role": "Vai trò",
+    "settings.household": "Hộ gia đình",
+    "settings.householdName": "Tên hộ gia đình",
+    "settings.appearance": "Giao diện",
+    "settings.language": "Ngôn ngữ",
+    "settings.logout": "Đăng xuất",
+    "settings.logoutConfirm": "Đăng xuất khỏi FFMS?",
+    "settings.signedInAs": "Đăng nhập với",
+
+    /* search + period */
+    "common.search": "Tìm kiếm",
+    "common.searchPlaceholder": "Tìm chi tiêu…",
+    "ins.period": "Kỳ",
+    "ins.period3": "3 th", "ins.period6": "6 th",
+    "ins.period12": "12 th",
+    "ins.categoryMix": "Chi tiêu theo danh mục",
+    "ins.categoryMixSub": "Tỷ lệ tổng chi tiêu trong kỳ",
+
+    /* toasts */
+    "toast.expenseAdded": "Đã thêm chi tiêu",
+    "toast.budgetSaved": "Đã lưu ngân sách",
+    "toast.goalAdded": "Đã thêm mục tiêu",
+    "toast.householdCreated": "Đã tạo hộ gia đình",
+    "toast.memberAdded": "Đã thêm thành viên",
+    "toast.roleUpdated": "Đã cập nhật vai trò",
+    "toast.loadError": "Không thể tải dữ liệu",
   },
 };
 

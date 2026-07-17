@@ -37,15 +37,19 @@ curl http://localhost:8000/predict/1
 ```
 
 ### Database Configuration
-**SECURITY NOTE**: Database credentials are hardcoded in `db/connection.py`. Replace with environment variables:
+Database credentials are read from environment variables (loaded via `python-dotenv`
+from the project-root `.env`, which is gitignored). See `.env.example` for the full
+list. `db/connection.py`:
 ```python
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
     "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD", "***********"),
+    "password": os.getenv("DB_PASSWORD", ""),
     "database": os.getenv("DB_NAME", "ffms"),
 }
 ```
+Do NOT reintroduce hardcoded credentials. The root `.env` is the FastAPI service's
+live config — never delete it (it is not tracked by git and cannot be recovered).
 
 ### Testing
 There are currently no test files in this repository. When adding tests, consider:
@@ -56,31 +60,44 @@ There are currently no test files in this repository. When adding tests, conside
 ### Project Structure
 ```
 /backend AI/
-├── main.py                    # FastAPI application
+├── main.py                    # FastAPI app: API-key middleware, rate limiter, CORS
 ├── routes/
-│   └── predict.py            # API routes
+│   ├── predict.py            # GET /predict/{household_id}
+│   └── insights.py           # GET /insights/{household_id} (aggregated analysis)
 ├── services/
-│   ├── ai_service.py         # Prediction and analysis logic
-│   └── db_service.py         # Database queries
+│   ├── ai_service.py         # RAG prediction (Claude) + deterministic fallback + analysis
+│   ├── db_service.py         # Database queries
+│   ├── limiter.py            # slowapi rate limiter (shared)
+│   └── validation.py         # Shared input validation
 ├── db/
-│   └── connection.py         # Database connection
+│   └── connection.py         # Database connection (env-based)
+├── tests/
+│   └── test_ai_service.py    # pytest suite for prediction/analysis logic
 ├── requirements.txt          # Dependencies
+├── .env.example              # Env var template (copy to .env)
 ├── .gitignore                # Standard Python ignores
 ```
 
 ## Key Considerations
 
 ### Security
-- **Database credentials** are hardcoded (should use environment variables)
-- **CORS is configured** to allow any origin (`"*"`) with credentials enabled
-- No input validation framework (relying on FastAPI's basic validation)
+- **Database credentials** come from environment variables (`.env`, gitignored) — never hardcoded.
+- **CORS** is restricted to explicit origins via `CORS_ORIGINS` (no `"*"`, since `allow_credentials=True`).
+- **API-key auth**: `api_key_middleware` in `main.py` requires the `X-API-Key` header to match
+  `AI_SERVICE_API_KEY` on every request except the `/` health check. If the env var is empty the
+  check is disabled (local/trusted-network dev only). Comparison is constant-time.
+- **Rate limiting**: `slowapi` limits each client IP to `RATE_LIMIT_PER_MINUTE` (default 60) requests
+  on the `/predict` and `/insights` routes; over-limit returns HTTP 429. Limiter lives in
+  `services/limiter.py`; decorated routes must take a `request: Request` param.
+- **Input validation**: `services/validation.py` rejects non-positive `household_id` (HTTP 400) and
+  clamps `threshold` to 0–100. Error responses use generic messages (no raw value echoing).
 
 ### Architecture Notes
 - Simple, monolithic structure with clear separation of concerns
 - Linear regression model for trend prediction - consider evaluating for more sophisticated models
 - Database abstraction layer is minimal - could benefit from repository pattern
 - Error handling is basic (catching ConnectionError, HTTP exceptions)
-- No logging infrastructure - add for production debugging
+- Logging is configured in `main.py` via `logging.basicConfig` (level from `LOG_LEVEL`, default INFO)
 
 ### Technology Stack
 - **Framework**: FastAPI

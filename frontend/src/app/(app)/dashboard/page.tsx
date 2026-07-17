@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useHouseholdData, type Goal } from "@/context/HouseholdDataContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useAuth } from "@/context/AuthContext";
 import { useCan } from "@/lib/permissions";
+import { useToast } from "@/components/feedback/Toast";
+import { PageSkeleton } from "@/components/feedback/Skeleton";
 import {
   Card,
   CardHeader,
@@ -15,6 +17,7 @@ import {
   StatusBadge,
   ProgressBar,
   EmptyState,
+  Icon,
 } from "@/components/ui";
 import { aggregateByMonth, fmtMoney, fmtDate } from "@/lib/format";
 
@@ -32,21 +35,27 @@ export default function DashboardPage() {
     createHousehold,
     addGoal,
     loadAll,
+    clearError,
   } = useHouseholdData();
   const { user, authFetch } = useAuth();
   const { t } = useLanguage();
+  const toast = useToast();
   const canFn = useCan();
   const canManage = canFn("household.manage");
 
-  if (loading) {
-    return (
-      <div className="grid h-64 place-items-center text-sm text-ink-400">{t("common.loading")}</div>
-    );
-  }
+  // Surface load/action errors as toasts instead of inline banners.
+  useEffect(() => {
+    if (error) {
+      toast.error(error);
+      clearError();
+    }
+  }, [error, toast, clearError]);
+
+  if (loading) return <PageSkeleton />;
 
   /* No household yet */
   if (!household) {
-    return <CreateHousehold busy={busy} error={error} onCreate={createHousehold} />;
+    return <CreateHousehold busy={busy} onCreate={createHousehold} />;
   }
 
   const pred = insights?.predictions?.expense;
@@ -63,32 +72,37 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      {error && (
-        <p className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>
-      )}
-
       {/* Summary stats */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="stagger grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
+          hero
+          style={{ "--i": 0 } as React.CSSProperties}
           label={t("dash.predictedNextMonth")}
           value={fmtMoney(pred?.predicted)}
+          icon={<Icon name="spark" className="h-5 w-5" />}
           sub={<span>{t("dash.vsLastMonth")}</span>}
           trend={<TrendArrow percent={pred?.increase_percent} goodWhenUp={false} />}
         />
         <StatCard
+          style={{ "--i": 1 } as React.CSSProperties}
           label={t("dash.lastMonth")}
           value={fmtMoney(pred?.last_month)}
+          icon={<Icon name="wallet" className="h-5 w-5" />}
           sub={<span>{t("dash.actualSpend")}</span>}
         />
         <StatCard
+          style={{ "--i": 2 } as React.CSSProperties}
           label={t("dash.monthlyBudget")}
           value={fmtMoney(budget?.total_budget)}
+          icon={<Icon name="target" className="h-5 w-5" />}
           sub={<span>{fmtMoney(budget?.spent_this_month)} {t("dash.spent")}</span>}
         />
         <StatCard
+          style={{ "--i": 3 } as React.CSSProperties}
           label={t("dash.remaining")}
           value={fmtMoney(remaining)}
           accent={remaining < 0 ? "red" : "emerald"}
+          icon={<Icon name="trendUp" className="h-5 w-5" />}
           sub={<span>{remaining < 0 ? t("dash.overBudget") : t("dash.leftThisMonth")}</span>}
         />
       </div>
@@ -105,17 +119,17 @@ export default function DashboardPage() {
           }
         />
         <TrendChart
-          points={months.map((m) => ({ label: m.label, value: m.total }))}
+          points={months.map((m) => ({ label: m.label, value: m.total, ym: m.ym }))}
           forecast={forecast}
         />
         {!insights && (
-          <p className="mt-3 text-sm text-ink-400">{t("dash.add3Months")}</p>
+          <p className="mt-3 text-sm text-ink-400 dark:text-ink-500">{t("dash.add3Months")}</p>
         )}
       </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Recent expenses */}
-        <Card className="card-pad lg:col-span-2">
+        <Card className="card-pad card-hover lg:col-span-2">
           <CardHeader
             title={t("dash.recentExpenses")}
             action={
@@ -127,17 +141,17 @@ export default function DashboardPage() {
           {recent.length === 0 ? (
             <EmptyState title={t("dash.noExpensesYet")} hint={t("dash.noExpensesHint")} />
           ) : (
-            <ul className="divide-y divide-ink-100">
+            <ul className="divide-y divide-ink-100 dark:divide-ink-800">
               {recent.map((x) => (
                 <li key={x.id} className="flex items-center justify-between py-3">
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-ink-800">{fmtMoney(x.amount)}</p>
-                    <p className="truncate text-xs text-ink-400">
+                    <p className="truncate font-medium text-ink-800 dark:text-ink-100">{fmtMoney(x.amount)}</p>
+                    <p className="truncate text-xs text-ink-400 dark:text-ink-500">
                       {x.category_name ?? t("common.uncategorized")}
                       {x.description ? ` · ${x.description}` : ""}
                     </p>
                   </div>
-                  <span className="ml-3 shrink-0 text-xs text-ink-400">
+                  <span className="ml-3 shrink-0 text-xs text-ink-400 dark:text-ink-500">
                     {fmtDate(x.expense_date)}
                   </span>
                 </li>
@@ -154,13 +168,14 @@ export default function DashboardPage() {
           ) : (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-ink-500">{t("dash.status")}</span>
+                <span className="text-sm text-ink-500 dark:text-ink-400">{t("dash.status")}</span>
                 <StatusBadge status={pred?.status} />
               </div>
-              <p className="text-sm text-ink-700">{insights.analysis?.message}</p>
+              <p className="text-sm text-ink-700 dark:text-ink-300">{insights.analysis?.message}</p>
               {insights.savings?.tip && (
-                <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
-                  {insights.savings.tip}
+                <div className="flex gap-2.5 rounded-xl border-l-4 border-emerald-500 bg-emerald-50/80 p-3 text-sm text-emerald-800 dark:border-emerald-400 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  <Icon name="bulb" className="h-5 w-5 shrink-0 text-emerald-500 dark:text-emerald-400" />
+                  <span>{insights.savings.tip}</span>
                 </div>
               )}
               <Link href="/insights" className="btn-primary w-full">
@@ -186,35 +201,31 @@ export default function DashboardPage() {
 
 function CreateHousehold({
   busy,
-  error,
   onCreate,
 }: {
   busy: boolean;
-  error: string;
   onCreate: (name: string) => Promise<void>;
 }) {
   const { t } = useLanguage();
+  const toast = useToast();
   return (
     <div className="mx-auto max-w-md">
       <Card className="card-pad">
         <div className="mb-4 text-center">
-          <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl brand-gradient text-white shadow-[var(--shadow-pop)]">
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 13h4v8H3zM10 8h4v13h-4zM17 3h4v18h-4z" />
-            </svg>
+          <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl brand-gradient text-white shadow-pop">
+            <Icon name="home" className="h-6 w-6" />
           </span>
-          <h2 className="text-lg font-semibold text-ink-900">{t("dash.createHousehold")}</h2>
-          <p className="mt-1 text-sm text-ink-500">{t("dash.createHouseholdSub")}</p>
+          <h2 className="text-lg font-semibold text-ink-900 dark:text-ink-50">{t("dash.createHousehold")}</h2>
+          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">{t("dash.createHouseholdSub")}</p>
         </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();
             const name = (new FormData(e.currentTarget).get("name") as string)?.trim();
-            if (name) onCreate(name);
+            if (name) onCreate(name).then(() => toast.success(t("toast.householdCreated")));
           }}
           className="space-y-3"
         >
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           <div>
             <label className="label">{t("dash.householdName")}</label>
             <input name="name" required placeholder={t("dash.householdNamePlaceholder")} className="input" />
@@ -247,6 +258,7 @@ function MembersPanel({
   authFetch: AuthFetch;
 }) {
   const { t } = useLanguage();
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"parent" | "child">("child");
   const [busy, setBusy] = useState(false);
@@ -280,6 +292,7 @@ function MembersPanel({
         return;
       }
       setEmail("");
+      toast.success(t("toast.memberAdded"));
       await onChanged();
     } finally {
       setBusy(false);
@@ -298,6 +311,7 @@ function MembersPanel({
         setError((r.data as { error?: string })?.error ?? "Failed to update role");
         return;
       }
+      toast.success(t("toast.roleUpdated"));
       await onChanged();
     } finally {
       setBusy(false);
@@ -336,19 +350,19 @@ function MembersPanel({
       />
       {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
 
-      <ul className="divide-y divide-ink-100">
+      <ul className="divide-y divide-ink-100 dark:divide-ink-800">
         {members.map((m) => (
           <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="min-w-0">
-              <p className="font-medium text-ink-800">
+              <p className="font-medium text-ink-800 dark:text-ink-100">
                 {m.email}
                 {m.id === currentUserId && (
-                  <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                  <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-soft dark:text-brand-200">
                     {t("members.you")}
                   </span>
                 )}
               </p>
-              <p className="text-xs text-ink-400">{roleText(m.role)}</p>
+              <p className="text-xs text-ink-400 dark:text-ink-500">{roleText(m.role)}</p>
             </div>
             {canManage && m.role !== "owner" && (
               <div className="flex items-center gap-2">
@@ -376,7 +390,7 @@ function MembersPanel({
       </ul>
 
       {canManage && (
-        <form onSubmit={doAdd} className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-100 pt-4">
+        <form onSubmit={doAdd} className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-100 dark:border-ink-800 pt-4">
           <div className="flex-1">
             <label className="label">{t("members.email")}</label>
             <input
@@ -422,6 +436,7 @@ function GoalsCard({
   busy: boolean;
 }) {
   const { t } = useLanguage();
+  const toast = useToast();
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [current, setCurrent] = useState("");
@@ -431,6 +446,7 @@ function GoalsCard({
     const tgt = Number(target);
     if (!name.trim() || !Number.isFinite(tgt) || tgt <= 0) return;
     await onAdd(name.trim(), tgt, Number(current) || 0);
+    toast.success(t("toast.goalAdded"));
     setName("");
     setTarget("");
     setCurrent("");
@@ -452,8 +468,8 @@ function GoalsCard({
             return (
               <li key={g.id}>
                 <div className="mb-1 flex items-center justify-between text-sm">
-                  <span className="font-medium text-ink-800">{g.name}</span>
-                  <span className="text-ink-500">
+                  <span className="font-medium text-ink-800 dark:text-ink-100">{g.name}</span>
+                  <span className="text-ink-500 dark:text-ink-400">
                     {fmtMoney(g.current_amount)} / {fmtMoney(g.target_amount)}
                   </span>
                 </div>
@@ -462,9 +478,8 @@ function GoalsCard({
                   max={Number(g.target_amount)}
                   tone={reached ? "emerald" : "brand"}
                 />
-                <p className="mt-1 text-xs text-ink-400">
-                  {pct}%{" "}
-                  {reached ? t("goals.reached") : t("goals.ofTarget")}
+                <p className="mt-1 text-xs text-ink-400 dark:text-ink-500">
+                  {pct}% {reached ? t("goals.reached") : t("goals.ofTarget")}
                 </p>
               </li>
             );
@@ -475,7 +490,7 @@ function GoalsCard({
       {canManage && (
         <form
           onSubmit={doAdd}
-          className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-100 pt-4"
+          className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-100 dark:border-ink-800 pt-4"
         >
           <div className="min-w-[140px] flex-1">
             <label className="label">{t("goals.name")}</label>

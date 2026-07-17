@@ -5,26 +5,28 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { useToast } from "@/components/feedback/Toast";
 import AuthLayout from "@/components/AuthLayout";
+import { Icon } from "@/components/ui";
 
 export default function LoginPage() {
   const { login } = useAuth();
   const { t } = useLanguage();
+  const toast = useToast();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
     setBusy(true);
     try {
       await login(email, password);
       router.push("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("login.failed"));
+      toast.error(err instanceof Error ? err.message : t("login.failed"));
     } finally {
       setBusy(false);
     }
@@ -37,7 +39,7 @@ export default function LoginPage() {
       footer={
         <>
           {t("login.noAccount")}{" "}
-          <Link href="/register" className="font-semibold text-brand-700 hover:text-brand-800">
+          <Link href="/register" className="font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300">
             {t("login.createOne")}
           </Link>
         </>
@@ -57,18 +59,25 @@ export default function LoginPage() {
         </div>
         <div>
           <label className="label">{t("login.password")}</label>
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="input"
-          />
+          <div className="relative">
+            <input
+              type={showPw ? "text" : "password"}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="input pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw((s) => !s)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-400 transition hover:text-ink-700 dark:hover:text-ink-200"
+              aria-label={showPw ? "Hide password" : "Show password"}
+            >
+              <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
+            </button>
+          </div>
         </div>
-        {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
-        )}
         <button type="submit" disabled={busy} className="btn-primary w-full">
           {busy ? t("login.submitting") : t("login.submit")}
         </button>
