@@ -104,21 +104,40 @@ def linear_regression_predict(data: list[dict], amount_key: str = "total_expense
 
 
 # ─────────────── Holt's double exponential smoothing (trend-aware) ───────────────
-def holt_forecast(totals: list[float], h: int = 1, alpha: float = 0.6, beta: float = 0.3) -> float:
-    """Dự báo chuỗi bằng Holt (cấp độ + xu hướng), tốt hơn Linear Regression
-    khi chuỗi có xu hướng phi tuyến nhẹ. Trả về giá trị dự báo bước h tới.
+def _holt_core(
+    totals: list[float], h: int = 1, alpha: float = 0.6, beta: float = 0.3, phi: float = 0.98
+) -> dict:
+    """Holt's damped double exponential smoothing (trend-aware).
+
+    Returns the h-step forecast plus the in-sample 1-step fitted values, which
+    the caller can use for residual / prediction-interval estimation. Damping
+    (``phi < 1``) restrains the long-run trend, which is usually more accurate
+    than un-damped Holt for real-world spending series that don't grow forever.
     """
     n = len(totals)
     if n < 2:
-        return float(totals[-1]) if totals else 0.0
+        base = float(totals[-1]) if totals else 0.0
+        return {"pred": base, "fitted": [], "level": base, "trend": 0.0}
 
     level = float(totals[0])
     trend = float(totals[1] - totals[0])
+    fitted: list[float] = []
     for y in totals[1:]:
+        fitted.append(level + phi * trend)  # 1-step-ahead forecast of y
         last_level = level
-        level = alpha * y + (1 - alpha) * (level + trend)
+        level = alpha * y + (1 - alpha) * (level + phi * trend)
         trend = beta * (level - last_level) + (1 - beta) * trend
-    return level + h * trend
+    return {"pred": level + h * phi * trend, "fitted": fitted, "level": level, "trend": trend}
+
+
+def holt_forecast(
+    totals: list[float], h: int = 1, alpha: float = 0.6, beta: float = 0.3, phi: float = 0.98
+) -> float:
+    """Dự báo chuỗi bằng Holt (cấp độ + xu hướng), tốt hơn Linear Regression
+    khi chuỗi có xu hướng phi tuyến nhẹ. Mặc định dùng damped trend (phi=0.98)
+    để hạn chế overshoot. Trả về giá trị dự báo bước h tới.
+    """
+    return float(_holt_core(totals, h, alpha, beta, phi)["pred"])
 
 
 def _apply_seasonality(totals: list[float], months: list[int], base: float) -> float:
@@ -301,6 +320,47 @@ def _rag_tool_spec() -> dict:
     }
 
 
+# ───────────────────────── Prediction interval ─────────────────────────
+def _z_for_confidence(confidence: str) -> float:
+    """Wider band when we are *less* confident (few/volatile observations).
+
+    Callers map an honest confidence level to a z-multiplier: low confidence
+    (short or choppy history) gets the widest band, high confidence the narrow.
+    """
+    return {"high": 1.28, "medium": 1.645, "low": 1.96}.get(str(confidence).lower(), 1.645)
+
+
+def _prediction_interval(
+    totals: list[float], predicted: float, confidence: str
+) -> list[float]:
+    """Volatility-based 1-step prediction interval ``[lo, hi]``.
+
+    Width is driven by the std-dev of month-over-month changes, so a stable
+    series earns a tight band while a volatile one gets a wide one; it is
+    widened further when confidence is low or history is short. A small scaled
+    floor keeps a perfectly smooth series from reporting a misleading
+    zero-width (false-certainty) band. Always non-negative. Gives callers an
+    honest uncertainty range instead of a lone point estimate.
+    """
+    predicted = float(predicted)
+    if len(totals) < 2:
+        return [round(max(0.0, predicted), 2), round(predicted, 2)]
+
+    diffs = np.diff(np.asarray(totals, dtype=float))
+    sd = float(np.std(diffs)) if diffs.size else 0.0
+    z = _z_for_confidence(confidence)
+    if len(totals) < 6:
+        z *= 1.4  # few observations -> extra uncertainty
+
+    half = z * sd
+    floor = 0.02 * abs(float(np.mean(totals)))  # scaled minimum band
+    half = max(half, floor)
+
+    lo = max(0.0, predicted - half)
+    hi = predicted + half
+    return [round(lo, 2), round(hi, 2)]
+
+
 # ───────────────────────── Fallback helper ─────────────────────────
 def _first_sentence(text: str) -> str:
     """Rút gọn một mẩu tri thức thành một câu ngắn gọn làm gợi ý."""
@@ -369,6 +429,7 @@ def _rag_fallback(
 
     totals = [float(r.get(amount_key, 0)) for r in data]
     confidence = "low" if method == "fallback_error" else _deterministic_confidence(totals)
+    interval = _prediction_interval(totals, pred, confidence)
 
     # Even without an LLM, retrieved knowledge enriches the suggestions (RAG
     # works in the free/offline path too). Take up to 3 first sentences.
@@ -384,6 +445,7 @@ def _rag_fallback(
 
     return {
         "predicted": pred,
+        "interval": interval,
         "explanation": explanation,
         "suggestions": suggestions,
         "confidence": confidence,
@@ -450,8 +512,11 @@ def _finalize_rag(inp, data, amount_key, reason) -> dict:
     if confidence not in ("low", "medium", "high"):
         confidence = "medium"
 
+    interval = _prediction_interval(recent, predicted, confidence)
+
     return {
         "predicted": round(predicted, 2),
+        "interval": interval,
         "explanation": str(inp.get("explanation", "")),
         "suggestions": [str(s) for s in suggestions[:3]],
         "confidence": confidence,
@@ -710,8 +775,18 @@ def predict_next_month(
     )
 
 
-def analyze(predicted: float, last_month: float, budget: float | None) -> dict:
-    """Phân tích kết quả dự đoán so với tháng trước và ngân sách."""
+def analyze(
+    predicted: float,
+    last_month: float,
+    budget: float | None,
+    interval: tuple[float, float] | None = None,
+) -> dict:
+    """Phân tích kết quả dự đoán so với tháng trước và ngân sách.
+
+    ``interval`` là khoảng dự báo [lo, hi] (do ``_prediction_interval`` tính).
+    Nếu cận trên (hi) vượt ngân sách trong khi status vẫn 'normal', tự động
+    nâng lên 'warning' — dựa trên biên độ không chắc chắn thay vì chỉ điểm ước.
+    """
 
     if last_month > 0:
         increase_percent = round(((predicted - last_month) / last_month) * 100, 2)
@@ -723,6 +798,20 @@ def analyze(predicted: float, last_month: float, budget: float | None) -> dict:
     suggestion = "Continue maintaining your current spending habits."
 
     if budget is not None and predicted > budget:
+        status = "warning"
+        message = "Next month expense may exceed your budget"
+        suggestion = "Reduce unnecessary spending and electricity usage"
+
+    # Ngay cả khi điểm ước chưa vượt, cận trên của khoảng dự báo vượt ngân sách
+    # thì vẫn nên cảnh báo (rủi ro vượt). Chỉ nâng từ 'normal' để không ghi đè
+    # cảnh báo 'abnormal' (tăng đột biến) ở dưới.
+    if (
+        status == "normal"
+        and budget is not None
+        and interval is not None
+        and len(interval) == 2
+        and interval[1] > budget
+    ):
         status = "warning"
         message = "Next month expense may exceed your budget"
         suggestion = "Reduce unnecessary spending and electricity usage"
@@ -882,10 +971,16 @@ def forecast_category_breakdown(
             method = "fallback_none" if not series else "single_point"
         else:
             predicted, method = deterministic_forecast(series, amount_key)
+
+        cat_totals = [s["total"] for s in series]
+        conf = _deterministic_confidence(cat_totals) if len(cat_totals) >= 2 else "low"
+        interval = _prediction_interval(cat_totals, predicted, conf)
+
         out.append(
             {
                 "category": name,
                 "predicted": predicted,
+                "interval": interval,
                 "last": round(series[-1]["total"], 2),
                 "months": len(series),
                 "method": method,
@@ -894,6 +989,60 @@ def forecast_category_breakdown(
 
     out.sort(key=lambda x: -x["predicted"])
     return out
+
+
+def backtest_forecast(
+    data: list[dict], amount_key: str = "total_expense", min_train: int = 3
+) -> dict | None:
+    """Walk-forward 1-step backtest of the deterministic forecaster.
+
+    For every month from ``min_train`` onward, fit on all earlier months and
+    predict the next, then compare the prediction against the actual. Reports
+    MAE / RMSE / MAPE and a skill score versus a naive last-value baseline so
+    callers can judge how much the model actually helps (skill > 0 means the
+    model beats "just use last month"). Returns None when history is too short
+    to backtest. Pure function — no DB, no network.
+
+    Use it to (a) quantify forecast quality per household, and (b) decide which
+    households are safe to trust the point estimate vs. should lean on the
+    prediction interval instead.
+    """
+    totals = [float(r.get(amount_key, 0)) for r in data]
+    if len(totals) < min_train + 1:
+        return None
+
+    preds: list[float] = []
+    acts: list[float] = []
+    for i in range(min_train, len(totals)):
+        p, _ = deterministic_forecast(
+            [{"yr": 0, "month": j, amount_key: v} for j, v in enumerate(totals[:i])],
+            amount_key,
+        )
+        preds.append(p)
+        acts.append(totals[i])
+
+    naive = totals[min_train - 1: -1]  # last value seen before each test month
+    errs = [a - p for a, p in zip(acts, preds)]
+    nerrs = [a - n for a, n in zip(acts, naive)]
+
+    mae = float(np.mean([abs(e) for e in errs])) if errs else 0.0
+    rmse = float(np.sqrt(np.mean([e * e for e in errs]))) if errs else 0.0
+    mape = (
+        float(np.mean([abs(e / a) * 100 for e, a in zip(errs, acts) if a]))
+        if acts else 0.0
+    )
+    nmae = float(np.mean([abs(e) for e in nerrs])) if nerrs else 0.0
+    skill = round(1 - mae / nmae, 3) if nmae else None
+
+    return {
+        "method": "deterministic_walk_forward",
+        "folds": len(acts),
+        "mae": round(mae, 2),
+        "rmse": round(rmse, 2),
+        "mape_percent": round(mape, 2),
+        "naive_mae": round(nmae, 2),
+        "skill_vs_naive": skill,  # >0 => model beats last-value baseline
+    }
 
 
 def suggest_cutbacks(categories: list[dict]) -> dict:

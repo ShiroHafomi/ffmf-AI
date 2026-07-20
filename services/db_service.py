@@ -1,21 +1,46 @@
 """Truy vấn dữ liệu chi tiêu và ngân sách từ MySQL."""
 
+from contextlib import contextmanager
 from datetime import datetime
 
 from db.connection import get_connection
 
 
-def get_monthly_expenses(household_id: int) -> list[dict]:
-    """Lấy tổng chi tiêu theo tháng (tối đa 6 tháng gần nhất, cũ -> mới)."""
-    # Khởi tạo None trước try: nếu get_connection() ném lỗi thì `connection`
-    # vẫn được gán (None) và khối finally không bắn NameError.
-    connection = None
-    cursor = None
+@contextmanager
+def _db_cursor(dictionary: bool = True, connection=None):
+    """Yield ``(cursor, connection)`` for one query.
 
+    If ``connection`` is provided it is reused (the caller owns its lifecycle and
+    must close it); otherwise a pooled connection is acquired and returned to the
+    pool afterwards. The cursor is always closed; the connection is only closed
+    when we acquired it ourselves. Lets a request run all its reads on a single
+    connection instead of churning the pool once per query.
+    """
+    own = connection is None
+    conn = connection if connection is not None else get_connection()
+    cur = conn.cursor(dictionary=dictionary)
     try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
+        yield cur, conn
+    finally:
+        cur.close()
+        if own and conn.is_connected():
+            conn.close()
 
+
+def get_monthly_expenses(household_id: int, limit: int = 24, connection=None) -> list[dict]:
+    """Lấy tổng chi tiêu theo tháng (tối đa `limit` tháng gần nhất, cũ -> mới).
+
+    Mặc định lấy tới 24 tháng (thay vì 6) để bộ dự báo có đủ dữ liệu chạy
+    Holt (>=6 điểm) và điều chỉnh theo mùa (>=12 điểm). `limit` được clamp
+    vào [3, 60] để tránh query vô hạn. Nếu `connection` được truyền vào thì
+    tái sử dụng (route mở 1 connection cho cả request), không tự đóng.
+    """
+    try:
+        safe_limit = max(3, min(int(limit), 60))
+    except (TypeError, ValueError):
+        safe_limit = 24
+
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
         # Tổng chi tiêu nhóm theo NĂM + THÁNG, sắp xếp tăng dần
         # (cũ nhất trước) để mỗi phần tử là một tháng độc lập, không bị
         # gộp các tháng trùng số giữa các năm.
@@ -27,31 +52,31 @@ def get_monthly_expenses(household_id: int) -> list[dict]:
             FROM expenses
             WHERE household_id = %s
             GROUP BY yr, month
-            ORDER BY yr ASC, month ASC
-            LIMIT 6
+            ORDER BY yr DESC, month DESC
+            LIMIT %s
         """
 
-        cursor.execute(query, (household_id,))
+        cursor.execute(query, (household_id, safe_limit))
+        # LIMIT lấy "limit tháng gần nhất" theo thứ tự giảm dần -> đảo ngược
+        # về "cũ -> mới" để khớp downstream (expenses[-1] được xem là tháng mới nhất).
         results = cursor.fetchall()
+        results.reverse()
         return results
 
-    finally:
-        # Đóng kết nối (chỉ khi đã mở thành công)
-        if connection is not None and connection.is_connected():
-            if cursor is not None:
-                cursor.close()
-            connection.close()
 
+def get_monthly_incomes(household_id: int, limit: int = 24, connection=None) -> list[dict]:
+    """Lấy tổng thu nhập theo tháng (tối đa `limit` tháng gần nhất, cũ -> mới).
 
-def get_monthly_incomes(household_id: int) -> list[dict]:
-    """Lấy tổng thu nhập theo tháng (tối đa 6 tháng gần nhất, cũ -> mới)."""
-    connection = None
-    cursor = None
-
+    Giống ``get_monthly_expenses``, mặc định 24 tháng để dự báo thu nhập cũng
+    có thể dùng Holt / theo mùa. `limit` clamp [3, 60]. Nếu `connection` được
+    truyền vào thì tái sử dụng (route mở 1 connection cho cả request).
+    """
     try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
+        safe_limit = max(3, min(int(limit), 60))
+    except (TypeError, ValueError):
+        safe_limit = 24
 
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
         # Tổng thu nhập nhóm theo NĂM + THÁNG, sắp xếp tăng dần.
         query = """
             SELECT
@@ -61,35 +86,27 @@ def get_monthly_incomes(household_id: int) -> list[dict]:
             FROM incomes
             WHERE household_id = %s
             GROUP BY yr, month
-            ORDER BY yr ASC, month ASC
-            LIMIT 6
+            ORDER BY yr DESC, month DESC
+            LIMIT %s
         """
 
-        cursor.execute(query, (household_id,))
+        cursor.execute(query, (household_id, safe_limit))
+        # Tương tự get_monthly_expenses: LIMIT lấy các tháng gần nhất (giảm dần)
+        # -> đảo ngược về "cũ -> mới".
         results = cursor.fetchall()
+        results.reverse()
         return results
 
-    finally:
-        if connection is not None and connection.is_connected():
-            if cursor is not None:
-                cursor.close()
-            connection.close()
 
-
-def get_latest_budget(household_id: int) -> float | None:
+def get_latest_budget(household_id: int, connection=None) -> float | None:
     """Lấy TỔNG ngân sách mới nhất (theo năm và tháng gần nhất) của hộ.
 
     Một hộ có thể có nhiều ngân sách theo từng danh mục cho cùng một
     tháng. Hàm này cộng gộp (SUM) tất cả các khoản đó của tháng mới nhất
-    thay vì chỉ lấy 1 dòng bất kỳ.
+    thay vì chỉ lấy 1 dòng bất kỳ. Nếu `connection` được truyền vào thì
+    tái sử dụng (route mở 1 connection cho cả request).
     """
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
         # Tìm (năm, tháng) mới nhất của hộ, sau đó cộng gộp toàn bộ
         # ngân sách của tháng đó.
         query = """
@@ -111,27 +128,18 @@ def get_latest_budget(household_id: int) -> float | None:
         result = cursor.fetchone()
         return float(result["amount"]) if result and result["amount"] is not None else None
 
-    finally:
-        if connection is not None and connection.is_connected():
-            if cursor is not None:
-                cursor.close()
-            connection.close()
 
-
-def get_category_expenses(household_id: int, month: int = None, year: int = None) -> list[dict]:
-    """Lấy chi tiêu theo danh mục của tháng hiện tại."""
+def get_category_expenses(
+    household_id: int, month: int = None, year: int = None, connection=None
+) -> list[dict]:
+    """Lấy chi tiêu theo danh mục của tháng hiện tại. Nếu `connection` được
+    truyền vào thì tái sử dụng (route mở 1 connection cho cả request)."""
     if month is None:
         month = datetime.now().month
     if year is None:
         year = datetime.now().year
 
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
         query = """
             SELECT
                 c.name AS category_name,
@@ -150,23 +158,15 @@ def get_category_expenses(household_id: int, month: int = None, year: int = None
         results = cursor.fetchall()
         return results
 
-    finally:
-        if connection is not None and connection.is_connected():
-            if cursor is not None:
-                cursor.close()
-            connection.close()
-
 
 def get_monthly_category_expenses(
-    household_id: int, months: int = 6
+    household_id: int, months: int = 12, connection=None
 ) -> list[dict]:
-    """Lấy tổng chi tiêu theo danh mục + tháng (6 tháng gần nhất) để dự báo
-    theo danh mục. Gom nhóm theo danh mục, năm, tháng."""
-    connection = None
-    cursor = None
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
+    """Lấy tổng chi tiêu theo danh mục + tháng (mặc định 12 tháng gần nhất) để
+    dự báo theo danh mục. Gom nhóm theo danh mục, năm, tháng. `months` clamp
+    [3, 60]. Nếu `connection` được truyền vào thì tái sử dụng (route mở 1
+    connection cho cả request)."""
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
         query = """
             SELECT
                 COALESCE(c.name, 'Other') AS category_name,
@@ -182,29 +182,19 @@ def get_monthly_category_expenses(
         """
         cursor.execute(query, (household_id, int(months)))
         return cursor.fetchall()
-    finally:
-        if connection is not None and connection.is_connected():
-            if cursor is not None:
-                cursor.close()
-            connection.close()
 
 
 def get_category_budgets(
-    household_id: int, month: int = None, year: int = None
+    household_id: int, month: int = None, year: int = None, connection=None
 ) -> list[dict]:
-    """Lấy ngân sách theo danh mục của tháng hiện tại."""
+    """Lấy ngân sách theo danh mục của tháng hiện tại. Nếu `connection` được
+    truyền vào thì tái sử dụng (route mở 1 connection cho cả request)."""
     if month is None:
         month = datetime.now().month
     if year is None:
         year = datetime.now().year
 
-    connection = None
-    cursor = None
-
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
         query = """
             SELECT
                 c.name AS category_name,
@@ -219,12 +209,6 @@ def get_category_budgets(
         cursor.execute(query, (household_id, month, year))
         results = cursor.fetchall()
         return results
-
-    finally:
-        if connection is not None and connection.is_connected():
-            if cursor is not None:
-                cursor.close()
-            connection.close()
 
 
 # ───────────────────────── Expense CRUD ─────────────────────────

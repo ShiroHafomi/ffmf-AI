@@ -23,7 +23,7 @@ from services.db_service import (
 )
 from services.validation import handle_db_error
 
-router = APIRouter()
+router = APIRouter(tags=["Auth"])
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -48,7 +48,7 @@ class PublicUser(BaseModel):
     model_config = {"from_attributes": True}
 
 
-@router.post("/api/auth/register")
+@router.post("/api/auth/register", summary="Register a new user", status_code=status.HTTP_201_CREATED)
 @limiter.limit(DEFAULT_LIMIT)
 def register(request: Request, payload: RegisterRequest):
     """Đăng ký user mới (201 Created -> { user })."""

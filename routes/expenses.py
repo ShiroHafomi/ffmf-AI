@@ -22,8 +22,9 @@ from services.db_service import (
     category_belongs_to_household,
 )
 from services.validation import handle_db_error
+from services.cache import invalidate_household
 
-router = APIRouter()
+router = APIRouter(tags=["Expenses"])
 
 
 # ───────────────────────── Schemas ─────────────────────────
@@ -73,7 +74,7 @@ def _validate_date(value: Optional[str]) -> Optional[str]:
 
 
 # ───────────────────────── Endpoints ─────────────────────────
-@router.post("/api/expenses")
+@router.post("/api/expenses", summary="Create an expense")
 @limiter.limit(DEFAULT_LIMIT)
 def create_expense(request: Request, payload: ExpenseCreate):
     """Thêm một khoản chi tiêu mới (201 Created)."""
@@ -121,6 +122,9 @@ def create_expense(request: Request, payload: ExpenseCreate):
     if row is None:
         # Vừa tạo mà không đọc lại được -> lỗi DB, không lộ chi tiết.
         handle_db_error("get_expense_by_id", ConnectionError("created row not found"))
+    # Ghi thành công -> xoá cache dự báo/insights của hộ để lần đọc kế tiếp
+    # phản ánh dữ liệu mới (không phục vụ kết quả cũ).
+    invalidate_household(payload.household_id)
     # 201 Created (spec). Trả object trực tiếp qua HTTPException để
     # status code được đảm bảo trên mọi bản FastAPI.
     raise HTTPException(
@@ -129,7 +133,7 @@ def create_expense(request: Request, payload: ExpenseCreate):
     )
 
 
-@router.get("/api/expenses")
+@router.get("/api/expenses", summary="List expenses")
 @limiter.limit(DEFAULT_LIMIT)
 def get_expenses(
     request: Request,
@@ -144,7 +148,7 @@ def get_expenses(
     return {"expenses": [ExpenseOut(**r) for r in rows]}
 
 
-@router.get("/api/expenses/{expense_id}")
+@router.get("/api/expenses/{expense_id}", summary="Get an expense")
 @limiter.limit(DEFAULT_LIMIT)
 def get_expense(request: Request, expense_id: int):
     """Lấy chi tiết một khoản (200 OK -> {expense})."""
@@ -157,7 +161,7 @@ def get_expense(request: Request, expense_id: int):
     return {"expense": ExpenseOut(**row)}
 
 
-@router.put("/api/expenses/{expense_id}")
+@router.put("/api/expenses/{expense_id}", summary="Update an expense")
 @limiter.limit(DEFAULT_LIMIT)
 def update_expense_endpoint(request: Request, expense_id: int, payload: ExpenseUpdate):
     """Cập nhật một khoản (200 OK). Chỉ các trường được truyền."""
@@ -199,18 +203,37 @@ def update_expense_endpoint(request: Request, expense_id: int, payload: ExpenseU
     if not ok:
         raise HTTPException(status_code=404, detail="Expense not found.")
 
+    # Ghi thành công -> xoá cache của hộ (household_id lấy từ khoản đang sửa).
+    hid = existing.get("household_id")
+    if hid is not None:
+        invalidate_household(hid)
+
     row = get_expense_by_id(expense_id)
     return ExpenseOut(**row)
 
 
-@router.delete("/api/expenses/{expense_id}")
+@router.delete("/api/expenses/{expense_id}", summary="Delete an expense")
 @limiter.limit(DEFAULT_LIMIT)
 def delete_expense_endpoint(request: Request, expense_id: int):
     """Xoá một khoản (200 OK)."""
+    # Lấy household_id TRƯỚC khi xoá để có thể invalidate cache sau đó.
+    try:
+        existing = get_expense_by_id(expense_id)
+    except ConnectionError as e:
+        handle_db_error("get_expense_by_id", e)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Expense not found.")
+
     try:
         ok = delete_expense(expense_id)
     except ConnectionError as e:
         handle_db_error("delete_expense", e)
     if not ok:
         raise HTTPException(status_code=404, detail="Expense not found.")
+
+    # Xoá thành công -> xoá cache dự báo/insights của hộ.
+    hid = existing.get("household_id")
+    if hid is not None:
+        invalidate_household(hid)
+
     return {"deleted": expense_id, "ok": True}

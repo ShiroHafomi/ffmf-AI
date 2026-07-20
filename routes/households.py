@@ -35,7 +35,7 @@ from services.household_service import (
 from services.db_service import find_user_by_id
 from services.validation import handle_db_error
 
-router = APIRouter()
+router = APIRouter(tags=["Households"])
 
 
 # ───────────────────────── Helpers ─────────────────────────
@@ -135,7 +135,7 @@ class ChangeRoleRequest(BaseModel):
 
 
 # ───────────────────────── Endpoints ─────────────────────────
-@router.post("/api/households")
+@router.post("/api/households", summary="Create a household")
 @limiter.limit(DEFAULT_LIMIT)
 def create_household_endpoint(request: Request, payload: CreateHouseholdRequest):
     """Tạo hộ mới. Owner = người gọi (X-User-Id). 409 nếu đã thuộc hộ khác."""
@@ -162,7 +162,7 @@ def create_household_endpoint(request: Request, payload: CreateHouseholdRequest)
     )
 
 
-@router.get("/api/households/me")
+@router.get("/api/households/me", summary="Get my household")
 @limiter.limit(DEFAULT_LIMIT)
 def get_my_household(request: Request):
     """Lấy hộ của người gọi kèm danh sách thành viên."""
@@ -177,7 +177,7 @@ def get_my_household(request: Request):
     return {"household": household, "members": members}
 
 
-@router.get("/api/households/{household_id}")
+@router.get("/api/households/{household_id}", summary="Get a household by id")
 @limiter.limit(DEFAULT_LIMIT)
 def get_household_by_id(request: Request, household_id: int):
     """Truy vấn chi tiết hộ theo id (kèm thành viên)."""
@@ -188,7 +188,7 @@ def get_household_by_id(request: Request, household_id: int):
     return {"household": household, "members": members}
 
 
-@router.get("/api/households")
+@router.get("/api/households", summary="Search households by name")
 @limiter.limit(DEFAULT_LIMIT)
 def search_households(request: Request, name: Optional[str] = None):
     """Truy vấn chi tiết hộ theo tên (khớp một phần)."""
@@ -200,7 +200,7 @@ def search_households(request: Request, name: Optional[str] = None):
     return {"households": rows}
 
 
-@router.post("/api/households/{household_id}/members")
+@router.post("/api/households/{household_id}/members", summary="Add a member")
 @limiter.limit(DEFAULT_LIMIT)
 def add_member_endpoint(
     request: Request, household_id: int, payload: AddMemberRequest
@@ -220,7 +220,7 @@ def add_member_endpoint(
     return {"id": member_id, "user_id": payload.user_id, "role": role}
 
 
-@router.put("/api/households/{household_id}")
+@router.put("/api/households/{household_id}", summary="Update a household")
 @limiter.limit(DEFAULT_LIMIT)
 def update_household_endpoint(
     request: Request, household_id: int, payload: UpdateHouseholdRequest
@@ -241,7 +241,7 @@ def update_household_endpoint(
     return household
 
 
-@router.delete("/api/households/{household_id}")
+@router.delete("/api/households/{household_id}", summary="Soft-delete a household")
 @limiter.limit(DEFAULT_LIMIT)
 def delete_household_endpoint(request: Request, household_id: int):
     """Xoá mềm hộ (is_deleted = 1), owner only."""
@@ -252,7 +252,7 @@ def delete_household_endpoint(request: Request, household_id: int):
     return {"id": household_id, "deleted": True}
 
 
-@router.delete("/api/households/{household_id}/members/{user_id}")
+@router.delete("/api/households/{household_id}/members/{user_id}", summary="Remove a member")
 @limiter.limit(DEFAULT_LIMIT)
 def remove_member_endpoint(
     request: Request, household_id: int, user_id: int
@@ -265,7 +265,7 @@ def remove_member_endpoint(
     return {"id": user_id, "removed": True}
 
 
-@router.post("/api/households/invite")
+@router.post("/api/households/invite", summary="Invite a member by email")
 @limiter.limit(DEFAULT_LIMIT)
 def invite_endpoint(request: Request, payload: InviteRequest):
     """Mời (thêm) user hiện có vào hộ của người gọi theo email (owner only)."""
@@ -285,7 +285,7 @@ def invite_endpoint(request: Request, payload: InviteRequest):
     return {"id": member_id, "email": email, "role": role}
 
 
-@router.patch("/api/households/members/{user_id}/role")
+@router.patch("/api/households/members/{user_id}/role", summary="Change a member's role")
 @limiter.limit(DEFAULT_LIMIT)
 def change_role_endpoint(
     request: Request, user_id: int, payload: ChangeRoleRequest
