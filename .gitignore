@@ -37,8 +37,7 @@ Thumbs.db
 .agent
 .tests
 
-# Tests
-tests/
+# Test caches only — the tests/ directory is committed and run in CI
 .pytest_cache/
 
 # Node dependencies (never commit; reinstalled via npm ci)
