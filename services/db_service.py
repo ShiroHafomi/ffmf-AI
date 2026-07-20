@@ -212,14 +212,287 @@ def get_category_budgets(
             FROM budgets b
             LEFT JOIN categories c ON b.category_id = c.id
             WHERE b.household_id = %s
-              AND b.month = %s
-              AND b.year = %s
+            AND b.month = %s
+            AND b.year = %s
         """
 
         cursor.execute(query, (household_id, month, year))
         results = cursor.fetchall()
         return results
 
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+# ───────────────────────── Expense CRUD ─────────────────────────
+def category_belongs_to_household(household_id: int, category_id: int) -> bool:
+    """True nếu category_id thuộc về household (dùng cho authz)."""
+    if category_id is None or category_id <= 0:
+        return False
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT 1 AS ok FROM categories WHERE id = %s AND household_id = %s",
+            (category_id, household_id),
+        )
+        return cursor.fetchone() is not None
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def insert_expense(
+    household_id: int,
+    amount: float,
+    category_id: int | None,
+    expense_date: str | None,
+    description: str | None,
+    user_id: int | None = None,
+) -> int:
+    """Thêm một khoản chi tiêu mới, trả về id vừa tạo."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO expenses
+                (household_id, category_id, amount, description, user_id, expense_date)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                household_id,
+                category_id,
+                amount,
+                description,
+                user_id,
+                expense_date,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def list_expenses(household_id: int | None, limit: int = 50) -> list[dict]:
+    """Lấy danh sách chi tiêu (mới nhất trước), tuỳ chọn theo hộ."""
+    safe_limit = 50
+    try:
+        lim = int(limit)
+        if lim > 0:
+            safe_limit = min(lim, 200)
+    except (TypeError, ValueError):
+        pass
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        if household_id is not None:
+            cursor.execute(
+                """
+                SELECT e.id, e.household_id, e.category_id, e.amount,
+                       e.description, e.expense_date, e.user_id,
+                       c.name AS category_name
+                FROM expenses e
+                LEFT JOIN categories c ON e.category_id = c.id
+                WHERE e.household_id = %s
+                ORDER BY e.expense_date DESC, e.id DESC
+                LIMIT %s
+                """,
+                (household_id, safe_limit),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT e.id, e.household_id, e.category_id, e.amount,
+                       e.description, e.expense_date, e.user_id,
+                       c.name AS category_name
+                FROM expenses e
+                LEFT JOIN categories c ON e.category_id = c.id
+                ORDER BY e.expense_date DESC, e.id DESC
+                LIMIT %s
+                """,
+                (safe_limit,),
+            )
+        return cursor.fetchall()
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def get_expense_by_id(expense_id: int) -> dict | None:
+    """Lấy một khoản chi tiêu theo id (kèm tên danh mục)."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT e.id, e.household_id, e.category_id, e.amount,
+                   e.description, e.expense_date, e.user_id,
+                   c.name AS category_name
+            FROM expenses e
+            LEFT JOIN categories c ON e.category_id = c.id
+            WHERE e.id = %s
+            """,
+            (expense_id,),
+        )
+        return cursor.fetchone()
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def update_expense(
+    expense_id: int,
+    amount: float | None = None,
+    category_id: int | None = None,
+    expense_date: str | None = None,
+    description: str | None = None,
+) -> bool:
+    """Cập nhật các trường được truyền (None = giữ nguyên). Trả về
+    True nếu có dòng bị ảnh hưởng (tồn tại)."""
+    fields: list[str] = []
+    params: list = []
+    if amount is not None:
+        fields.append("amount = %s")
+        params.append(amount)
+    if category_id is not None:
+        fields.append("category_id = %s")
+        params.append(category_id)
+    if expense_date is not None:
+        fields.append("expense_date = %s")
+        params.append(expense_date)
+    if description is not None:
+        fields.append("description = %s")
+        params.append(description)
+
+    if not fields:
+        # Không có gì để cập nhật — coi như thành công (id hợp lệ).
+        return True
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            f"UPDATE expenses SET {', '.join(fields)} WHERE id = %s",
+            params + [expense_id],
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def delete_expense(expense_id: int) -> bool:
+    """Xoá một khoản chi tiêu. Trả về True nếu có dòng bị xoá."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM expenses WHERE id = %s", (expense_id,))
+        connection.commit()
+        return cursor.rowcount > 0
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+# ───────────────────────── Auth / users ─────────────────────────
+def email_exists(email: str) -> bool:
+    """True nếu email đã được đăng ký (dùng cho register)."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT 1 AS ok FROM users WHERE email = %s", (email,))
+        return cursor.fetchone() is not None
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def create_user(email: str, password_hash: str, name: str | None = None) -> int:
+    """Tạo user mới, khớp convention của Node backend:
+      display_id = 'U' + 8 hex (randomBytes(4)), role_id = 3 (Member),
+      status = 1. Trả về id vừa tạo.
+    """
+    import secrets
+
+    display_id = "U" + secrets.token_hex(4).upper()
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO users (display_id, email, name, password_hash, role_id, status)
+            VALUES (%s, %s, %s, %s, 3, 1)
+            """,
+            (display_id, email, name, password_hash),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+    finally:
+        if connection is not None and connection.is_connected():
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+
+def find_user_by_id(user_id: int) -> dict | None:
+    """Lấy user công khai (không có password_hash), kèm household_role."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT u.id, u.email, u.full_name, u.name, u.role_id,
+                   u.household_id, u.status,
+                   hm.role AS household_role
+            FROM users u
+            LEFT JOIN household_members hm
+              ON hm.user_id = u.id AND hm.household_id = u.household_id
+            WHERE u.id = %s
+            """,
+            (user_id,),
+        )
+        return cursor.fetchone()
     finally:
         if connection is not None and connection.is_connected():
             if cursor is not None:

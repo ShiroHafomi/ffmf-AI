@@ -17,6 +17,9 @@ from slowapi.errors import RateLimitExceeded
 from services.limiter import limiter
 from routes.predict import router as predict_router
 from routes.insights import router as insights_router
+from routes.expenses import router as expenses_router
+from routes.auth import router as auth_router
+from routes.households import router as households_router
 
 # Tải biến môi trường từ file .env (CORS_ORIGINS, AI_SERVICE_API_KEY, ...) trước.
 load_dotenv()
@@ -120,3 +123,6 @@ app.add_middleware(
 # Đăng ký router
 app.include_router(predict_router)
 app.include_router(insights_router)
+app.include_router(expenses_router)
+app.include_router(auth_router)
+app.include_router(households_router)

@@ -6,7 +6,25 @@ with a generic message — we never echo the offending raw value back to the
 caller, which avoids leaking request internals.
 """
 
+import logging
+
 from fastapi import HTTPException
+
+logger = logging.getLogger("ffms")
+
+
+def handle_db_error(context: str, exc: Exception) -> None:
+    """Log the real DB error server-side but raise a *generic* 500.
+
+    The raw driver message (host, user, SQLSTATE, vendor version) must not
+    leak to the API client — only a generic detail is returned, matching the
+    project rule that error responses never echo raw values.
+    """
+    logger.error("Database error during %s: %s", context, exc)
+    raise HTTPException(
+        status_code=500,
+        detail="Database connection error. Please try again later.",
+    )
 
 
 def validate_household_id(household_id: int) -> None:
@@ -25,8 +43,4 @@ def validate_threshold(threshold: float) -> float:
     """
     if threshold is None:
         return 80.0
-    if threshold < 0:
-        return 0.0
-    if threshold > 100:
-        return 100.0
-    return threshold
+    return max(0.0, min(100.0, float(threshold)))

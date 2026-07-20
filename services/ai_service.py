@@ -25,7 +25,7 @@ from sklearn.linear_model import LinearRegression
 # Các lựa chọn (mới nhất -> nhẹ nhất):
 #   claude-opus-4-8             (mạnh nhất)
 #   claude-sonnet-5            (mạnh, nhanh & rẻ hơn)
-#   claude-haiku-4-5-20251001  (nhẹ nhất, chi phí thấp)
+#   claude-haiku-4-5           (nhẹ nhất, chi phí thấp)
 DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
 # Tham số gọi model (cấu hình qua env, có giá trị mặc định an toàn).
@@ -286,11 +286,21 @@ def _finalize_rag(inp, data, amount_key, reason) -> dict:
     if not np.isfinite(predicted) or predicted < 0 or predicted > 5 * max(avg, 1):
         return _rag_fallback(data, amount_key, "Predicted value out of sane range.")
 
+    # Guard the structured fields too: a malformed tool call must not leak
+    # bad data into the payload (e.g. a non-list suggestions or an unknown
+    # confidence level). Fall back to the deterministic model in that case.
+    suggestions = inp.get("suggestions", [])
+    if not isinstance(suggestions, list):
+        return _rag_fallback(data, amount_key, "Malformed suggestions field.")
+    confidence = str(inp.get("confidence", "medium")).lower()
+    if confidence not in ("low", "medium", "high"):
+        confidence = "medium"
+
     return {
         "predicted": round(predicted, 2),
         "explanation": str(inp.get("explanation", "")),
-        "suggestions": list(inp.get("suggestions", []) or [])[:3],
-        "confidence": str(inp.get("confidence", "medium")),
+        "suggestions": [str(s) for s in suggestions[:3]],
+        "confidence": confidence,
         "method": "rag",
     }
 
@@ -321,6 +331,11 @@ def _rag_predict_anthropic(
         resp = client.messages.create(
             model=model,
             max_tokens=MAX_TOKENS,
+            # Adaptive thinking is the only on-mode for Opus 4.8 — it lets the
+            # model reason about trend/seasonality before committing to a number.
+            # Works together with a forced tool_choice (the model still emits the
+            # report_prediction tool_use after thinking).
+            thinking={"type": "adaptive"},
             system=[
                 {
                     "type": "text",

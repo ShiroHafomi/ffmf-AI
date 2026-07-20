@@ -28,7 +28,11 @@ from services.ai_service import (
     evaluate_alert_thresholds,
     forecast_category_breakdown,
 )
-from services.validation import validate_household_id, validate_threshold
+from services.validation import (
+    validate_household_id,
+    validate_threshold,
+    handle_db_error,
+)
 
 router = APIRouter()
 
@@ -67,7 +71,7 @@ def insights(
     try:
         expenses = get_monthly_expenses(household_id)
     except ConnectionError as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi kết nối database: {e}")
+        handle_db_error("get_monthly_expenses", e)
 
     if not expenses:
         raise HTTPException(
@@ -85,7 +89,7 @@ def insights(
     try:
         budget = get_latest_budget(household_id)
     except ConnectionError as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi kết nối database: {e}")
+        handle_db_error("get_latest_budget", e)
 
     # Bước 2.5: Truy xuất danh mục làm ngữ cảnh RAG (best-effort).
     category_expenses: list[dict] = []

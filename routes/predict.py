@@ -19,7 +19,11 @@ from services.ai_service import (
     suggest_cutbacks,
     evaluate_alert_thresholds,
 )
-from services.validation import validate_household_id, validate_threshold
+from services.validation import (
+    validate_household_id,
+    validate_threshold,
+    handle_db_error,
+)
 
 router = APIRouter()
 
@@ -42,7 +46,7 @@ def predict(
     try:
         expenses = get_monthly_expenses(household_id)
     except ConnectionError as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi kết nối database: {e}")
+        handle_db_error("get_monthly_expenses", e)
 
     # Bước 2: Kiểm tra có dữ liệu không
     if not expenses:
@@ -62,7 +66,7 @@ def predict(
     try:
         budget = get_latest_budget(household_id)
     except ConnectionError as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi kết nối database: {e}")
+        handle_db_error("get_latest_budget", e)
 
     # Bước 4.5: Truy xuất (retrieve) phân rã danh mục làm ngữ cảnh cho RAG.
     # Nằm ngoài luồng chính — nếu lỗi truy vấn phụ thì bỏ qua, không làm sập.

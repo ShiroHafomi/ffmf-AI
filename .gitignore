@@ -34,3 +34,7 @@ Thumbs.db
 .agents
 .agent
 .tests
+
+# Tests
+tests/
+.pytest_cache/
