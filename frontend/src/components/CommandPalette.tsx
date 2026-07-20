@@ -56,10 +56,12 @@ export default function CommandPalette() {
 
   useEffect(() => {
     if (open) {
-      setQuery("");
-      setActive(0);
-      // focus after paint
-      requestAnimationFrame(() => inputRef.current?.focus());
+      // Reset state + focus after paint (avoids synchronous setState-in-effect).
+      requestAnimationFrame(() => {
+        setQuery("");
+        setActive(0);
+        inputRef.current?.focus();
+      });
     }
   }, [open]);
 
@@ -111,7 +113,10 @@ export default function CommandPalette() {
   }, [items, query]);
 
   useEffect(() => {
-    setActive((a) => Math.min(a, Math.max(0, filtered.length - 1)));
+    const id = requestAnimationFrame(() => {
+      setActive((a) => Math.min(a, Math.max(0, filtered.length - 1)));
+    });
+    return () => cancelAnimationFrame(id);
   }, [filtered.length]);
 
   function onKeyDown(e: React.KeyboardEvent) {

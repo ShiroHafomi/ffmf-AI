@@ -34,7 +34,7 @@ export async function apiFetch<T = unknown>(
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       credentials: 'include',
     });
-  } catch (e: any) {
+  } catch {
     // Network failure / server unreachable. Return a structured failure
     // (status 0) instead of throwing, so callers don't have to guard every
     // call and we avoid unhandled promise rejections app-wide.

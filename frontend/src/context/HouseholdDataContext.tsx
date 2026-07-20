@@ -174,18 +174,22 @@ export function HouseholdDataProvider({ children }: { children: ReactNode }) {
       if (ins.ok) setInsights(ins.data);
       else if (ins.status === 400) setInsights(null);
       if (gl.ok) setGoals(gl.data.goals ?? []);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Either a rejected fetch (now surfaced as status 0 by apiFetch) or some
       // other failure. Don't leave the UI stuck on an infinite spinner.
-      setError(e?.message ? `Failed to load data: ${e.message}` : 'Failed to load data');
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg ? `Failed to load data: ${msg}` : 'Failed to load data');
     } finally {
       setLoading(false);
     }
   }, [user, authFetch]);
 
   useEffect(() => {
-    if (user) loadAll();
-    else setLoading(false);
+    const id = requestAnimationFrame(() => {
+      if (user) loadAll();
+      else setLoading(false);
+    });
+    return () => cancelAnimationFrame(id);
   }, [user, loadAll]);
 
   const createHousehold = useCallback(

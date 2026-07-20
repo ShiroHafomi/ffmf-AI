@@ -42,13 +42,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = (window.localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "system";
-    setThemeState(stored);
     applyTheme(stored);
-    setResolved(
-      stored === "dark" || (stored === "system" && systemPrefersDark())
-        ? "dark"
-        : "light",
-    );
+    const id = requestAnimationFrame(() => {
+      setThemeState(stored);
+      setResolved(
+        stored === "dark" || (stored === "system" && systemPrefersDark())
+          ? "dark"
+          : "light",
+      );
+    });
+    return () => cancelAnimationFrame(id);
   }, []);
 
   // React to OS changes while in "system" mode.

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireCapability } from '../authz/authorize';
 import { findUserById } from '../services/userService';
-import { getCurrentBudgets, setMonthlyBudget, getCategoryBreakdown, suggestCutbacks, evaluateAlertThresholds, parseCategoryThresholds } from '../services/budgetService';
+import { getCurrentBudgets, setMonthlyBudget, updateBudget, deleteBudget, getCategoryBreakdown, suggestCutbacks, evaluateAlertThresholds, parseCategoryThresholds } from '../services/budgetService';
 import { monthlyTotal } from '../services/expenseService';
 
 const router = Router();
@@ -92,6 +92,54 @@ router.get('/suggestions', requireCapability('budget.view'), async (req: Request
     });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
+  }
+});
+
+function parseIdParam(raw: string | undefined): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function statusFor(err: any): number {
+  return /not found/i.test(err?.message ?? '') ? 404 : 500;
+}
+
+router.put('/:id', requireCapability('budget.manage'), async (req: Request, res: Response) => {
+  try {
+    const user = await findUserById(req.userId!);
+    if (!user || !user.household_id) {
+      return res.status(400).json({ error: 'You need a household first' });
+    }
+    const id = parseIdParam(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ error: 'invalid id' });
+    }
+    const { amount } = req.body ?? {};
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt < 0) {
+      return res.status(400).json({ error: 'amount must be a non-negative number' });
+    }
+    await updateBudget(id, user.household_id, amt);
+    return res.json({ id, amount: amt });
+  } catch (e: any) {
+    return res.status(statusFor(e)).json({ error: e.message });
+  }
+});
+
+router.delete('/:id', requireCapability('budget.manage'), async (req: Request, res: Response) => {
+  try {
+    const user = await findUserById(req.userId!);
+    if (!user || !user.household_id) {
+      return res.status(400).json({ error: 'You need a household first' });
+    }
+    const id = parseIdParam(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ error: 'invalid id' });
+    }
+    await deleteBudget(id, user.household_id);
+    return res.json({ id });
+  } catch (e: any) {
+    return res.status(statusFor(e)).json({ error: e.message });
   }
 });
 

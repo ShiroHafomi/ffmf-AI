@@ -27,6 +27,8 @@ export type Capability =
   | 'insight.view'
   | 'budget.view'
   | 'budget.manage'
+  | 'income.view'
+  | 'income.create'
   | 'expense.view'
   | 'expense.create'
   | 'category.view'
@@ -34,6 +36,12 @@ export type Capability =
   | 'household.view'
   | 'household.manage'
   | 'household.create'
+  | 'dashboard.view'
+  | 'report.view'
+  | 'notification.view'
+  | 'notification.send'
+  | 'utility.view'
+  | 'utility.create'
   | 'system.admin';
 
 // Authority ranking within a household (higher = more powerful).
@@ -57,8 +65,22 @@ export const PERMISSIONS: Record<Capability, Permission> = {
   'insight.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
   'budget.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
   'expense.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+  'income.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+  'income.create': { minHouseholdRole: HOUSEHOLD_ROLE.PARENT },
   'category.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
   'household.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+
+  // Dashboard & reports: any household member may view their own household.
+  'dashboard.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+  'report.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+
+  // Notifications: any member may read their own; only a global admin may send.
+  'notification.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+  'notification.send': { systemOnly: true },
+
+  // Utilities: any member may view; parents (and above) may add meter readings.
+  'utility.view': { minHouseholdRole: HOUSEHOLD_ROLE.CHILD },
+  'utility.create': { minHouseholdRole: HOUSEHOLD_ROLE.PARENT },
 
   // Write/manage capabilities: parent and above (child is read-only).
   'expense.create': { minHouseholdRole: HOUSEHOLD_ROLE.PARENT },

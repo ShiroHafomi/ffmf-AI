@@ -38,7 +38,6 @@ export default function AdminPage() {
   const [query, setQuery] = useState("");
 
   async function load() {
-    setLoading(true);
     const [hh, us] = await Promise.all([
       authFetch<{ households: AdminHousehold[] }>("/api/admin/households"),
       authFetch<{ users: AdminUser[] }>("/api/admin/users"),
@@ -49,7 +48,10 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    if (canAdmin) load();
+    const id = requestAnimationFrame(() => {
+      if (canAdmin) load();
+    });
+    return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canAdmin]);
 

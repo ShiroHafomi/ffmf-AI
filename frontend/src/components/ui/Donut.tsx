@@ -48,7 +48,17 @@ export function Donut({
     );
   }
 
-  let offset = 0;
+  const segments = withColor.reduce<
+    { s: (typeof withColor)[number]; len: number; offset: number }[]
+  >((acc, s) => {
+    const frac = Math.max(0, s.value) / total;
+    const len = frac * circ;
+    const offset =
+      acc.length === 0 ? 0 : acc[acc.length - 1].offset + acc[acc.length - 1].len;
+    acc.push({ s, len, offset });
+    return acc;
+  }, []);
+
   return (
     <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
@@ -61,28 +71,22 @@ export function Donut({
             stroke="var(--border)"
             strokeWidth={thickness}
           />
-          {withColor.map((s) => {
-            const frac = Math.max(0, s.value) / total;
-            const len = frac * circ;
-            const seg = (
-              <circle
-                key={s.name}
-                cx={c}
-                cy={c}
-                r={r}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={thickness}
-                strokeDasharray={`${len} ${circ - len}`}
-                strokeDashoffset={-offset}
-                strokeLinecap="butt"
-              >
-                <title>{`${s.name}: ${fmtMoney(s.value)} (${fmtNumber(Math.round(frac * 100))}%)`}</title>
-              </circle>
-            );
-            offset += len;
-            return seg;
-          })}
+          {segments.map(({ s, len, offset }) => (
+            <circle
+              key={s.name}
+              cx={c}
+              cy={c}
+              r={r}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={thickness}
+              strokeDasharray={`${len} ${circ - len}`}
+              strokeDashoffset={-offset}
+              strokeLinecap="butt"
+            >
+              <title>{`${s.name}: ${fmtMoney(s.value)} (${fmtNumber(Math.round((Math.max(0, s.value) / total) * 100))}%)`}</title>
+            </circle>
+          ))}
         </g>
       </svg>
 

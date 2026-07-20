@@ -12,13 +12,12 @@ import {
   TrendChart,
   StatusBadge,
   PriorityBadge,
-  ProgressBar,
   EmptyState,
   Donut,
   Icon,
   type TrendPoint,
 } from "@/components/ui";
-import { aggregateByMonth, fmtMoney, fmtNumber } from "@/lib/format";
+import { aggregateByMonth, fmtMoney } from "@/lib/format";
 
 const PERIODS = [3, 6, 12] as const;
 
@@ -69,7 +68,6 @@ export default function InsightsPage() {
   const forecast = pred?.predicted
     ? { label: t("common.forecast"), value: Number(pred.predicted) }
     : undefined;
-  const cats = insights.category_analysis?.categories ?? [];
   const actions = insights.recommended_actions ?? [];
   const anomalies = insights.anomalies ?? [];
   const savings = insights.savings;

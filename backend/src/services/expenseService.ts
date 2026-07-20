@@ -73,3 +73,62 @@ export async function monthlyTotal(
   );
   return parseFloat(rows[0]?.total ?? 0);
 }
+
+export async function getExpense(
+  id: number,
+  householdId: number,
+): Promise<ExpenseRow | null> {
+  const [rows] = await pool.execute<any[]>(
+    `SELECT e.id, e.amount, e.description, e.expense_date, e.category_id,
+            c.name AS category_name, e.user_id
+     FROM expenses e
+     LEFT JOIN categories c ON e.category_id = c.id
+     WHERE e.id = ? AND e.household_id = ?`,
+    [id, householdId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    amount: parseFloat(r.amount),
+    description: r.description,
+    expense_date: r.expense_date,
+    category_id: r.category_id,
+    category_name: r.category_name,
+    user_id: r.user_id,
+  };
+}
+
+export interface ExpensePatch {
+  amount?: number;
+  categoryId?: number | null;
+  expenseDate?: string;
+}
+
+export async function updateExpense(
+  id: number,
+  householdId: number,
+  patch: ExpensePatch,
+): Promise<void> {
+  const sets: string[] = [];
+  const vals: any[] = [];
+  if (patch.amount !== undefined) {
+    sets.push('amount = ?');
+    vals.push(patch.amount);
+  }
+  if (patch.categoryId !== undefined) {
+    sets.push('category_id = ?');
+    vals.push(patch.categoryId ?? null);
+  }
+  if (patch.expenseDate !== undefined) {
+    sets.push('expense_date = ?');
+    vals.push(patch.expenseDate);
+  }
+  if (sets.length === 0) return;
+  vals.push(id, householdId);
+  const [r] = await pool.execute<any>(
+    `UPDATE expenses SET ${sets.join(', ')} WHERE id = ? AND household_id = ?`,
+    vals,
+  );
+  if ((r.affectedRows ?? 0) === 0) throw new Error('expense not found');
+}

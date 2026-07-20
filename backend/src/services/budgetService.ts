@@ -54,6 +54,27 @@ export async function setMonthlyBudget(
   return result.insertId as number;
 }
 
+export async function updateBudget(
+  id: number,
+  householdId: number,
+  amount: number,
+): Promise<void> {
+  const [r] = await pool.execute<any>(
+    `UPDATE budgets SET amount = ?, updated_at = NOW()
+     WHERE id = ? AND household_id = ?`,
+    [amount, id, householdId],
+  );
+  if ((r.affectedRows ?? 0) === 0) throw new Error('budget not found');
+}
+
+export async function deleteBudget(id: number, householdId: number): Promise<void> {
+  const [r] = await pool.execute<any>(
+    'DELETE FROM budgets WHERE id = ? AND household_id = ?',
+    [id, householdId],
+  );
+  if ((r.affectedRows ?? 0) === 0) throw new Error('budget not found');
+}
+
 // Per-category spent vs budget for a given month/year (mirrors the AI service's
 // category breakdown so the cut-back / alert logic can run in Node too).
 export interface CategoryBreakdownRow {

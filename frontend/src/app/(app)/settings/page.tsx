@@ -5,7 +5,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useHouseholdData } from "@/context/HouseholdDataContext";
-import { useToast } from "@/components/feedback/Toast";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { Card, CardHeader, Icon } from "@/components/ui";
 import { initials } from "@/lib/format";
@@ -16,7 +15,6 @@ export default function SettingsPage() {
   const { t } = useLanguage();
   const { theme, setTheme } = useTheme();
   const { household } = useHouseholdData();
-  const toast = useToast();
   const router = useRouter();
 
   async function onLogout() {

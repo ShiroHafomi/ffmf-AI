@@ -83,8 +83,6 @@ export default function ExpensesPage() {
     });
   }, [sorted, filter, search]);
 
-  if (loading) return <PageSkeleton />;
-
   // Surface load/action errors as toasts instead of inline banners.
   useEffect(() => {
     if (error) {
@@ -92,6 +90,8 @@ export default function ExpensesPage() {
       clearError();
     }
   }, [error, toast, clearError]);
+
+  if (loading) return <PageSkeleton />;
 
   if (!household) {
     return (
