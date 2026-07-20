@@ -8,8 +8,6 @@ các thao tác theo id chỉ thành công khi khoản đó tồn tại.
 Status code theo REST: POST -> 201 (tạo mới), các thao tác còn lại -> 200.
 """
 
-from datetime import date
-
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from typing import Optional

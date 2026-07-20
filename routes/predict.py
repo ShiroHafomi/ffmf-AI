@@ -81,7 +81,8 @@ def predict(
         sum(float(c["total"]) for c in category_expenses) if category_expenses else 0
     )
 
-    # Bước 5: Dự đoán bằng RAG (Claude), fallback LinearRegression khi cần.
+    # Bước 5: Dự đoán (deterministic primary; RAG retrieval enriches suggestions;
+    # LLM chỉ dùng nếu LLM_PROVIDER được bật tường minh).
     pred_res = predict_next_month(
         expenses,
         amount_key="total_expense",
@@ -148,7 +149,7 @@ def predict(
         "status": analysis["status"],
         "message": analysis["message"],
         "suggestion": analysis["suggestion"],
-        # Thông tin từ RAG (Claude) — method cho biết có thực sự dùng LLM hay fallback.
+        # Thông tin dự đoán — method cho biết dùng mô hình deterministic hay LLM (nếu opt-in).
         "prediction_method": pred_res.get("method"),
         "prediction_confidence": pred_res.get("confidence"),
         "prediction_explanation": pred_res.get("explanation"),

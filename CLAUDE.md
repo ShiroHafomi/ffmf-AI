@@ -10,7 +10,7 @@ This is a FastAPI microservice for household expense prediction written in Pytho
 - **Main Application** (`main.py`): FastAPI app with CORS middleware and root endpoint at `/`
 - **API Routes** (`routes/predict.py`): Single `/predict/{household_id}` endpoint that orchestrates the prediction workflow
 - **Services Layer**:
-  - `services/ai_service.py`: Linear regression prediction using scikit-learn and expense analysis logic
+  - `services/ai_service.py`: Forecasting. **Primary predictor is deterministic** (Linear Regression for short series, Holt exponential smoothing + seasonal adjustment for longer ones — free, offline, reproducible). RAG retrieval (`services/rag_retriever.py`, offline TF-IDF) enriches only the returned *suggestions*. An LLM is **strictly opt-in** via `LLM_PROVIDER` + credentials (anthropic or openai-compatible); any missing config or call failure falls back to the deterministic forecast. Analysis helpers: `analyze`, `analyze_categories`, `detect_anomalies`, `recommend_actions`, etc.
   - `services/db_service.py`: Database queries for monthly expenses and latest budget
 - **Database Layer** (`db/connection.py`): MySQL connection management with hardcoded credentials
 

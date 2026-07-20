@@ -123,8 +123,8 @@ export function TrendChart({
       >
         <defs>
           <linearGradient id="ffmsArea" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#4f46e5" stopOpacity="0.20" />
-            <stop offset="100%" stopColor="#4f46e5" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--color-brand-500)" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="var(--color-brand-500)" stopOpacity="0" />
           </linearGradient>
         </defs>
 

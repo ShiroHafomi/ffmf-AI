@@ -12,7 +12,7 @@ import bcrypt
 import re
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 
 from services.limiter import limiter, DEFAULT_LIMIT

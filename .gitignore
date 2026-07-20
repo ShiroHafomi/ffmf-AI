@@ -30,7 +30,9 @@ Thumbs.db
 *.log
 
 # Agent / AI-tooling directories
-.claude
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .agents
 .agent
 .tests
@@ -38,3 +40,9 @@ Thumbs.db
 # Tests
 tests/
 .pytest_cache/
+
+# Node dependencies (never commit; reinstalled via npm ci)
+node_modules/
+
+# Hook audit logs
+logs/

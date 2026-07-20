@@ -1,50 +1,92 @@
-"""Dự đoán chi tiêu bằng RAG (Retrieval-Augmented Generation) với Claude.
+"""Next-month expense/income forecasting (deterministic-primary, RAG-augmented).
 
-Quy trình:
-  1. Truy xuất (retrieve) lịch sử chi tiêu theo tháng + phân rã danh mục.
-  2. Đưa ngữ cảnh đó vào prompt và gọi Claude (Anthropic) qua tool-use
-     có cấu trúc để lấy: predicted (số), explanation, suggestions, confidence.
-  3. Nếu thiếu ANTHROPIC_API_KEY, gọi API lỗi/từ chối, hoặc kết quả vô lý
-     -> tự động fallback về Linear Regression (tất định) để service không
-     bao giờ gãy.
+Pipeline:
+  1. RETRIEVE (data): monthly expense/income history + category breakdown (DB).
+  2. FORECAST (primary): a deterministic statistical model — Linear Regression
+     for short series (2-5 pts), Holt exponential smoothing for longer ones
+     (>=6 pts), with a seasonal additive adjustment when >=12 months exist.
+     Free, reproducible, no network.
+  3. RETRIEVE (knowledge): the most relevant financial-advice snippets for the
+     household's situation, via an offline TF-IDF retriever (see
+     services/rag_retriever.py). These enrich the returned *suggestions* only.
+  4. OPT-IN GENERATE: only if LLM_PROVIDER is explicitly set (anthropic + key,
+     or openai-compatible + configured endpoint) does an LLM produce the
+     forecast/narrative via structured tool-use. Any failure or missing config
+     falls back to step 2 — Claude is NEVER called unless the user opts in.
 
-Các hàm analyze / analyze_categories / detect_anomalies / ... giữ nguyên.
+Analysis helpers (analyze / analyze_categories / detect_anomalies / ...) are
+unchanged.
 """
 
+import logging
 import os
 
+import numpy as np
 from dotenv import load_dotenv
+from sklearn.linear_model import LinearRegression
+
+from services.rag_retriever import (
+    RAG_TOP_K,
+    build_knowledge_query,
+    retrieve_knowledge,
+)
+
+logger = logging.getLogger("ffms")
 
 load_dotenv()
-
-import numpy as np
-from sklearn.linear_model import LinearRegression
 
 # Model Claude dùng CHỈ khi LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY (opt-in
 # trả phí). Mặc định service chạy LLM miễn phí local (Ollama) hoặc deterministic.
 # Các lựa chọn (mới nhất -> nhẹ nhất):
 #   claude-opus-4-8             (mạnh nhất)
 #   claude-sonnet-5            (mạnh, nhanh & rẻ hơn)
-#   claude-haiku-4-5           (nhẹ nhất, chi phí thấp)
+#   claude-haiku-4-5-20251001  (nhẹ nhất, chi phí thấp)
 DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
-# Tham số gọi model (cấu hình qua env, có giá trị mặc định an toàn).
-MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "1024"))
-REQUEST_TIMEOUT = float(os.getenv("ANTHROPIC_TIMEOUT", "20"))
-MAX_RETRIES = int(os.getenv("ANTHROPIC_MAX_RETRIES", "1"))
+
+def _load_rag_config() -> dict:
+    """Đọc cấu hình RAG một lần tại import. Tập trung đảm bảo 'không bao giờ
+    gọi Claude tính phí trừ khi người dùng CỐ Ý bật', và loại bỏ các lời gọi
+    os.getenv rải rác trùng lặp giữa các provider.
+    """
+    return {
+        "provider": os.getenv("LLM_PROVIDER", "deterministic").strip().lower(),
+        "openai_base_url": os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").strip(),
+        "openai_model": os.getenv("LLM_MODEL", "llama-3.3-70b-versatile").strip(),
+        "openai_api_key": os.getenv("LLM_API_KEY", "").strip(),
+        "anthropic_model": os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL).strip(),
+        "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY", "").strip(),
+        "max_tokens": int(os.getenv("ANTHROPIC_MAX_TOKENS", "1024")),
+        "timeout": float(os.getenv("ANTHROPIC_TIMEOUT", "20")),
+        "max_retries": int(os.getenv("ANTHROPIC_MAX_RETRIES", "1")),
+        # 0 = dự báo xác định (deterministic) hoàn toàn; tăng nhẹ nếu muốn đa dạng.
+        "temperature": float(os.getenv("RAG_TEMPERATURE", "0")),
+        "top_k": RAG_TOP_K,
+    }
+
+
+_CONFIG = _load_rag_config()
 
 # System prompt ổn định (được cache — xem cache_control trong rag_predict).
 _RAG_SYSTEM = (
-    "You are a household finance forecasting assistant for the FFMS app. "
+    "You are a household finance forecasting assistant for the FFMS app.\n"
     "You are given a household's RETRIEVED monthly spending history (oldest to newest) "
-    "and, when available, a current-month category breakdown with budgets.\n"
-    "Predict the household's TOTAL spend for the NEXT calendar month.\n"
-    "Ground your prediction in: the recent trend/slope, any acceleration or deceleration, "
-    "obvious seasonality, and category spending relative to budget. "
-    "Be financially conservative — do NOT invent one-off events, bonuses, or emergencies. "
-    "If the history is too short or erratic to forecast confidently, say so in the explanation.\n"
-    "Return exactly one number for the predicted total and a short, concrete rationale. "
-    "The predicted value must be non-negative and within a plausible range of the recent average."
+    "and, when available, a current-month category breakdown with budgets, plus "
+    "RETRIEVED FINANCIAL KNOWLEDGE that you MUST ground your advice in.\n\n"
+    "TASK: predict the household's TOTAL spend for the NEXT calendar month as a single "
+    "number (no currency symbols).\n\n"
+    "HOW TO REASON (in order of importance):\n"
+    "1. Recent trend / slope and any acceleration or deceleration in the history.\n"
+    "2. Seasonality for the month being forecast (holidays, back-to-school, summer).\n"
+    "3. Category spending relative to budget, especially overspent or dominant categories.\n"
+    "4. The RETRIEVED FINANCIAL KNOWLEDGE — let it shape concrete, specific tips.\n\n"
+    "CONSTRAINTS:\n"
+    "- Be financially conservative. Do NOT invent one-off events, bonuses, or emergencies.\n"
+    "- The predicted value MUST be non-negative and within a plausible range of the recent "
+    "average (roughly 0.5x to 2x). If history is too short or erratic, say so in the "
+    "explanation and pick a value near the recent average.\n"
+    "- Provide 2-3 sentences of rationale and up to 3 short, actionable suggestions.\n"
+    "- Report your confidence as low / medium / high based on history length and stability."
 )
 
 
@@ -131,14 +173,31 @@ def deterministic_forecast(
 
 
 # ───────────────────────── Retrieval context builder ─────────────────────────
+def _season_label(month: int) -> str:
+    """Trả nhãn mùa vụ tiếng Anh cho một tháng dương lịch (dùng làm gợi ý
+    theo mùa cho model, không rò rỉ dữ liệu)."""
+    if month in (11, 12, 1):
+        return "year-end / holiday season"
+    if month in (8, 9):
+        return "back-to-school season"
+    if month in (6, 7, 8):
+        return "summer"
+    if month in (3, 4):
+        return "spring"
+    if month in (12, 1, 2):
+        return "winter"
+    return ""
+
+
 def _build_retrieval_context(
     data: list[dict],
     amount_key: str,
     category_context: list[dict] | None,
     budget: float | None,
     kind: str,
+    retrieved_knowledge: list[str] | None = None,
 ) -> str:
-    """Đóng gói lịch sử + ngữ cảnh danh mục thành văn bản truy xuất."""
+    """Đóng gói lịch sử + ngữ cảnh danh mục + tri thức truy xuất thành văn bản."""
     lines: list[str] = []
     label = "INCOME" if kind == "income" else "EXPENSE"
     lines.append(f"RETRIEVED MONTHLY {label} HISTORY (oldest -> newest):")
@@ -147,25 +206,39 @@ def _build_retrieval_context(
         amt = float(row.get(amount_key, 0))
         lines.append(f"- {ym}: {amt:,.2f}")
 
-    # Tóm tắt nhanh giúp model định hướng (xu hướng, biên độ) thay vì chỉ
-    # liệt kê số thô.
+    # Tóm tắt nhanh + các tín hiệu suy diễn giúp model định hướng thay vì chỉ
+    # liệt kê số thô. Tất cả đều suy từ lịch sử, không rò rỉ thêm dữ liệu.
     amounts = [float(row.get(amount_key, 0)) for row in data]
-    if amounts:
+    if len(amounts) >= 2:
+        first, last = amounts[0], amounts[-1]
+        prev = amounts[-2]
         avg = sum(amounts) / len(amounts)
-        slope = amounts[-1] - amounts[0]
+        slope = last - first
+        slope_pct = (slope / first * 100) if first else 0.0
+        mom_pct = ((last - prev) / prev * 100) if prev else 0.0
         direction = "up" if slope > 0 else ("down" if slope < 0 else "flat")
         lines.append(
-            "\nSUMMARY: months={n} avg={avg:,.2f} min={mn:,.2f} max={mx:,.2f} "
-            "last={last:,.2f} trend={dir} (delta {slope:,.2f})".format(
+            "\nSUMMARY: months={n} recent_avg={avg:,.2f} min={mn:,.2f} "
+            "max={mx:,.2f} last={last:,.2f} trend={dir} "
+            "trend_slope_pct={sp:+.1f} last_mom_change_pct={mom:+.1f}".format(
                 n=len(amounts),
                 avg=avg,
                 mn=min(amounts),
                 mx=max(amounts),
-                last=amounts[-1],
+                last=last,
                 dir=direction,
-                slope=slope,
+                sp=slope_pct,
+                mom=mom_pct,
             )
         )
+        # Gợi ý theo mùa của tháng được dự báo (từ tháng ghi nhận cuối cùng).
+        last_month = int(data[-1].get("month", 0))
+        next_month = (last_month % 12) + 1
+        season = _season_label(next_month)
+        if season:
+            lines.append(
+                f"SEASONALITY: forecasting {season} — expect typical seasonal patterns."
+            )
 
     if budget is not None:
         lines.append(f"\nCURRENT TOTAL BUDGET: {float(budget):,.2f}")
@@ -180,6 +253,15 @@ def _build_retrieval_context(
                 lines.append(f"- {name}: {spent:,.2f} / {float(bud):,.2f}")
             else:
                 lines.append(f"- {name}: {spent:,.2f} (no budget)")
+
+    # Tri thức truy xuất (RAG): các mẩu lời khuyên tài chính liên quan nhất
+    # tới tình trạng hộ gia đình, được bộ truy xuất chọn ra. Giúp model đưa ra
+    # giải thích/gợi ý cụ thể, có căn cứ thay vì chung chung.
+    if retrieved_knowledge:
+        lines.append("\nRETRIEVED FINANCIAL KNOWLEDGE (ground your advice in these):")
+        for i, snippet in enumerate(retrieved_knowledge, 1):
+            snippet = " ".join(str(snippet).split())
+            lines.append(f"{i}. {snippet}")
 
     lines.append("\nCall the report_prediction tool with your prediction.")
     return "\n".join(lines)
@@ -220,19 +302,91 @@ def _rag_tool_spec() -> dict:
 
 
 # ───────────────────────── Fallback helper ─────────────────────────
-def _rag_fallback(data: list[dict], amount_key: str, reason: str) -> dict:
-    pred, method = deterministic_forecast(data, amount_key)
-    label = {
-        "fallback_linear_regression": "linear regression",
-        "fallback_holt": "Holt exponential smoothing",
-        "fallback_holt_seasonal": "Holt exponential smoothing (seasonal)",
-        "fallback_none": "no history",
-    }.get(method, "deterministic model")
+def _first_sentence(text: str) -> str:
+    """Rút gọn một mẩu tri thức thành một câu ngắn gọn làm gợi ý."""
+    text = " ".join(str(text).split())
+    if ". " in text:
+        return text.split(". ")[0].rstrip(".") + "."
+    return text
+
+
+def _deterministic_confidence(totals: list[float]) -> str:
+    """Honest confidence from history length + stability.
+
+    Short or volatile series cannot support a confident point forecast, so we
+    report low; long, stable series earn medium/high. Replaces the old blanket
+    "low" so the deterministic path is characterised honestly.
+    """
+    n = len(totals)
+    if n < 6:
+        return "low"
+    mean = sum(totals) / n
+    if mean <= 0:
+        return "low"
+    cv = float(np.std(totals)) / mean  # coefficient of variation
+    if cv > 0.4:
+        return "low"
+    return "high" if (n >= 12 and cv < 0.25) else "medium"
+
+
+_METHOD_LABELS = {
+    "fallback_linear_regression": "linear regression",
+    "fallback_holt": "Holt exponential smoothing",
+    "fallback_holt_seasonal": "Holt exponential smoothing (seasonal)",
+    "fallback_none": "no history",
+}
+
+
+def _deterministic_explanation(method: str, totals: list[float]) -> str:
+    """A plain, data-derived explanation for the deterministic forecast."""
+    label = _METHOD_LABELS.get(method, "deterministic model")
+    if len(totals) >= 2:
+        first, last = totals[0], totals[-1]
+        direction = "rising" if last > first else ("falling" if last < first else "flat")
+        return f"Forecast via {label}; recent trend is {direction} ({first:,.0f} -> {last:,.0f})."
+    return f"Forecast via {label}."
+
+
+def _rag_fallback(
+    data: list[dict],
+    amount_key: str,
+    reason: str = "",
+    retrieved_knowledge: list[str] | None = None,
+) -> dict:
+    """Deterministic forecast — the PRIMARY predictor, not just an error path.
+
+    Returns {predicted, explanation, suggestions, confidence, method}. The
+    forecast number always comes from ``deterministic_forecast`` (free,
+    reproducible, no network). When retrieval succeeded, its snippets become
+    the suggestions. Any failure is contained: we still return a valid dict
+    (predicted=0) so the service never crashes.
+    """
+    try:
+        pred, method = deterministic_forecast(data, amount_key)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Deterministic forecast failed; returning safe zero. %s", type(e).__name__)
+        pred, method = 0.0, "fallback_error"
+
+    totals = [float(r.get(amount_key, 0)) for r in data]
+    confidence = "low" if method == "fallback_error" else _deterministic_confidence(totals)
+
+    # Even without an LLM, retrieved knowledge enriches the suggestions (RAG
+    # works in the free/offline path too). Take up to 3 first sentences.
+    suggestions = (
+        [_first_sentence(s) for s in retrieved_knowledge][:3]
+        if retrieved_knowledge
+        else []
+    )
+
+    explanation = _deterministic_explanation(method, totals)
+    if reason:
+        explanation = f"{explanation} ({reason})"
+
     return {
         "predicted": pred,
-        "explanation": f"Deterministic fallback ({label}). {reason}",
-        "suggestions": [],
-        "confidence": "low",
+        "explanation": explanation,
+        "suggestions": suggestions,
+        "confidence": confidence,
         "method": method,
     }
 
@@ -306,36 +460,49 @@ def _finalize_rag(inp, data, amount_key, reason) -> dict:
 
 
 # ───────────────────────── RAG predict (Claude — trả phí, opt-in) ─────────────────
+# Reused across requests to avoid re-authenticating on every call.
+_anthropic_client = None
+
+
+def _get_anthropic_client(api_key: str):
+    """Lazy singleton Anthropic client (reused across calls for speed)."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        from anthropic import Anthropic
+
+        _anthropic_client = Anthropic(
+            api_key=api_key,
+            timeout=_CONFIG["timeout"],
+            max_retries=_CONFIG["max_retries"],
+        )
+    return _anthropic_client
+
+
 def _rag_predict_anthropic(
-    data, amount_key, category_context, budget, kind, api_key
+    data, amount_key, category_context, budget, kind, api_key,
+    retrieved_knowledge=None,
 ) -> dict:
     """Gọi Claude (Anthropic). Chỉ chạy khi ANTHROPIC_API_KEY được set."""
     try:
-        from anthropic import (
-            Anthropic,
-            APIConnectionError,
-            APIError,
-            APITimeoutError,
-            RateLimitError,
-        )
+        import anthropic
     except ImportError:
-        return _rag_fallback(data, amount_key, "anthropic SDK not installed.")
+        return _rag_fallback(data, amount_key, "anthropic SDK not installed.",
+                             retrieved_knowledge)
 
-    model = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
-    context = _build_retrieval_context(data, amount_key, category_context, budget, kind)
+    model = _CONFIG["anthropic_model"]
+    context = _build_retrieval_context(
+        data, amount_key, category_context, budget, kind, retrieved_knowledge
+    )
 
     try:
-        client = Anthropic(
-            api_key=api_key, timeout=REQUEST_TIMEOUT, max_retries=MAX_RETRIES
-        )
+        client = _get_anthropic_client(api_key)
         resp = client.messages.create(
             model=model,
-            max_tokens=MAX_TOKENS,
-            # Adaptive thinking is the only on-mode for Opus 4.8 — it lets the
-            # model reason about trend/seasonality before committing to a number.
-            # Works together with a forced tool_choice (the model still emits the
-            # report_prediction tool_use after thinking).
-            thinking={"type": "adaptive"},
+            max_tokens=_CONFIG["max_tokens"],
+            temperature=_CONFIG["temperature"],
+            # No extended-thinking block: forced tool_choice + thinking is
+            # fragile across SDK versions, and the model reasons adequately
+            # within max_tokens before emitting report_prediction.
             system=[
                 {
                     "type": "text",
@@ -347,58 +514,71 @@ def _rag_predict_anthropic(
             tool_choice={"type": "tool", "name": "report_prediction"},
             messages=[{"role": "user", "content": context}],
         )
-    except (APIError, APIConnectionError, RateLimitError, APITimeoutError) as e:
-        return _rag_fallback(data, amount_key, f"Claude API error: {type(e).__name__}.")
+    except anthropic.APIError as e:
+        logger.warning("Claude API error (%s); falling back to deterministic.", type(e).__name__)
+        return _rag_fallback(data, amount_key, f"Claude API error: {type(e).__name__}.",
+                             retrieved_knowledge)
     except Exception as e:  # noqa: BLE001 — bất kỳ lỗi nào cũng fallback
-        return _rag_fallback(data, amount_key, f"Claude call failed: {type(e).__name__}.")
+        logger.warning("Claude call failed (%s); falling back to deterministic.", type(e).__name__)
+        return _rag_fallback(data, amount_key, f"Claude call failed: {type(e).__name__}.",
+                             retrieved_knowledge)
 
-    # Claude 4.8 có thể từ chối (refusal) — coi như thất bại, fallback.
+    # Claude có thể từ chối (refusal) — coi như thất bại, fallback.
     if getattr(resp, "stop_reason", None) == "refusal":
-        return _rag_fallback(data, amount_key, "Model refused the request.")
+        logger.warning("Claude refused the request; falling back to deterministic.")
+        return _rag_fallback(data, amount_key, "Model refused the request.",
+                             retrieved_knowledge)
 
     tool_use = next(
         (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
     )
     if not tool_use:
-        return _rag_fallback(data, amount_key, "No tool_use block in response.")
+        logger.warning("No tool_use block from Claude; falling back to deterministic.")
+        return _rag_fallback(data, amount_key, "No tool_use block in response.",
+                             retrieved_knowledge)
+    logger.info("RAG prediction generated via Claude (%s).", model)
     return _finalize_rag(tool_use.input, data, amount_key, "")
 
 
 # ─────────── RAG predict (LLM miễn phí — OpenAI-compatible: Groq/Together/...) ─────
 def _rag_predict_openai_compatible(
-    data, amount_key, category_context, budget, kind
+    data, amount_key, category_context, budget, kind, retrieved_knowledge=None
 ) -> dict:
     """Gọi một LLM miễn phí qua endpoint tương thích OpenAI (Groq, Together,
-    OpenRouter, ...). Dùng function-calling thay cho tool-use của Anthropic.
-    Mọi lỗi đều fallback về deterministic.
+    OpenRouter, Ollama local, ...). Dùng function-calling thay cho tool-use của
+    Anthropic. Mọi lỗi đều fallback về deterministic.
     """
     try:
         from openai import OpenAI
     except ImportError:
-        return _rag_fallback(data, amount_key, "openai SDK not installed.")
+        return _rag_fallback(data, amount_key, "openai SDK not installed.",
+                             retrieved_knowledge)
 
-    # Mặc định trỏ vào Groq (LLM miễn phí qua cloud, cần LLM_API_KEY).
-    # Đổi LLM_BASE_URL/LLM_MODEL sang Ollama/Together/OpenRouter nếu muốn.
-    base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").strip()
-    api_key = os.getenv("LLM_API_KEY", "").strip()
-    model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile").strip()
+    base_url = _CONFIG["openai_base_url"]
+    api_key = _CONFIG["openai_api_key"]
+    model = _CONFIG["openai_model"]
 
     # Ollama local không cần key; cloud provider (Groq/Together/...) cần LLM_API_KEY.
     is_local = any(t in base_url for t in ("localhost", "127.0.0.1", ":11434"))
     if not base_url or not model or (not api_key and not is_local):
-        return _rag_fallback(data, amount_key, "LLM not configured (using deterministic forecast).")
+        return _rag_fallback(data, amount_key,
+                             "LLM not configured (using deterministic forecast).",
+                             retrieved_knowledge)
 
-    context = _build_retrieval_context(data, amount_key, category_context, budget, kind)
+    context = _build_retrieval_context(
+        data, amount_key, category_context, budget, kind, retrieved_knowledge
+    )
     try:
         client = OpenAI(
             api_key=api_key or "not-needed",
             base_url=base_url,
-            timeout=REQUEST_TIMEOUT,
-            max_retries=MAX_RETRIES,
+            timeout=_CONFIG["timeout"],
+            max_retries=_CONFIG["max_retries"],
         )
         resp = client.chat.completions.create(
             model=model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=_CONFIG["max_tokens"],
+            temperature=_CONFIG["temperature"],
             messages=[
                 {"role": "system", "content": _RAG_SYSTEM},
                 {"role": "user", "content": context},
@@ -407,17 +587,23 @@ def _rag_predict_openai_compatible(
             tool_choice={"type": "function", "function": {"name": "report_prediction"}},
         )
     except Exception as e:  # noqa: BLE001 — mọi lỗi đều fallback
-        return _rag_fallback(data, amount_key, f"LLM call failed: {type(e).__name__}.")
+        logger.warning("LLM call failed (%s); falling back to deterministic.", type(e).__name__)
+        return _rag_fallback(data, amount_key, f"LLM call failed: {type(e).__name__}.",
+                             retrieved_knowledge)
 
     msg = resp.choices[0].message
     if not getattr(msg, "tool_calls", None):
-        return _rag_fallback(data, amount_key, "No tool_calls in response.")
+        logger.warning("No tool_calls from LLM; falling back to deterministic.")
+        return _rag_fallback(data, amount_key, "No tool_calls in response.",
+                             retrieved_knowledge)
     try:
         import json
 
         args = json.loads(msg.tool_calls[0].function.arguments or "{}")
     except (ValueError, AttributeError):
-        return _rag_fallback(data, amount_key, "Could not parse tool arguments.")
+        return _rag_fallback(data, amount_key, "Could not parse tool arguments.",
+                             retrieved_knowledge)
+    logger.info("RAG prediction generated via OpenAI-compatible LLM (%s).", model)
     return _finalize_rag(args, data, amount_key, "")
 
 
@@ -429,53 +615,73 @@ def rag_predict(
     budget: float | None = None,
     kind: str = "expense",
 ) -> dict:
-    """Dự báo bằng RAG. Ưu tiên LLM miễn phí được cấu hình, fallback về deterministic.
+    """Forecast the next month.
 
-    Chọn provider theo env:
-      - LLM_PROVIDER=openai-compatible (mặc định) + LLM_BASE_URL + LLM_MODEL
-        -> LLM miễn phí. Mặc định Groq (cloud, cần LLM_API_KEY). Đổi
-           LLM_BASE_URL sang Ollama local (http://localhost:11434/v1) để
-           chạy hoàn toàn offline, không cần key.
-      - LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY -> Claude (trả phí, opt-in tường minh)
-      - LLM_PROVIDER=deterministic                 -> chỉ deterministic, không gọi LLM
-      - không có gì khả dụng                        -> deterministic (miễn phí)
+    PRIMARY predictor: a deterministic statistical model (Linear Regression for
+    short series, Holt exponential smoothing for longer ones, with a seasonal
+    adjustment when >= 12 months are available). It is free, reproducible, and
+    needs no network.
 
-    Không bao giờ tự động gọi Claude: nếu LLM miễn phí lỗi/thiếu cấu hình,
-    service chuyển hẳn sang deterministic (miễn phí), không phát sinh phí.
+    The RAG retrieval step runs OFFLINE on every call and enriches the returned
+    *suggestions* with the most relevant financial-advice snippets — but it no
+    longer feeds the predicted number.
+
+    LLM generation is STRICTLY OPT-IN and never auto-invoked:
+      - LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY  -> Claude (paid, explicit)
+      - LLM_PROVIDER=openai-compatible + LLM_BASE_URL + LLM_MODEL (+ key for
+        cloud providers)                              -> free cloud LLM
+    Any missing configuration or call failure falls back to the deterministic
+    forecast above — no paid calls are ever made unexpectedly.
     """
+    # Refresh config from env each call so runtime changes (e.g. LLM_PROVIDER)
+    # take effect without a module reload.
+    global _CONFIG
+    _CONFIG = _load_rag_config()
+
     if not data or len(data) < 2:
         return _rag_fallback(data or [], amount_key, "Not enough history.")
 
-    provider = os.getenv("LLM_PROVIDER", "openai-compatible").strip().lower()
+    # RETRIEVE (offline, always): enrich suggestions with relevant advice.
+    # A retrieval failure must never break the forecast.
+    retrieved: list[str] = []
+    try:
+        signal = build_knowledge_query(data, amount_key, category_context, budget, kind)
+        retrieved = retrieve_knowledge(signal, top_k=_CONFIG["top_k"])
+    except Exception:  # noqa: BLE001 — retrieval failure must not break forecasting
+        logger.warning("Knowledge retrieval failed; proceeding without it.")
+        retrieved = []
 
-    # Luôn dùng deterministic, không gọi bất kỳ LLM nào (chế độ miễn phí tuyệt đối,
-    # không phát sinh network/phí). Hữu ích cho test và môi trường offline.
+    provider = _CONFIG["provider"]
+
+    # Default & recommended: deterministic forecast, retrieval-enriched tips.
     if provider == "deterministic":
-        return _rag_fallback(
-            data, amount_key, "Deterministic-only mode (LLM disabled)."
-        )
+        return _rag_fallback(data, amount_key, "", retrieved)
 
+    # Opt-in paid Claude.
     if provider == "anthropic":
-        # Paid opt-in: chỉ chạy khi người dùng CỐ Ý bật và cung cấp key.
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        anthropic_key = _CONFIG["anthropic_api_key"]
         if anthropic_key:
             return _rag_predict_anthropic(
-                data, amount_key, category_context, budget, kind, anthropic_key
+                data, amount_key, category_context, budget, kind,
+                anthropic_key, retrieved,
             )
         return _rag_fallback(
-            data, amount_key, "Claude opted-in but ANTHROPIC_API_KEY not set."
+            data, amount_key, "Claude opted-in but ANTHROPIC_API_KEY not set.", retrieved
         )
 
-    # Mặc định: openai-compatible (Groq miễn phí qua cloud). Mọi lỗi -> deterministic.
-    base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").strip()
-    model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile").strip()
-    if base_url and model:
-        return _rag_predict_openai_compatible(
-            data, amount_key, category_context, budget, kind
+    # Opt-in free cloud LLM (Groq/Together/OpenRouter/Ollama).
+    if provider == "openai-compatible":
+        if _CONFIG["openai_base_url"] and _CONFIG["openai_model"]:
+            return _rag_predict_openai_compatible(
+                data, amount_key, category_context, budget, kind, retrieved
+            )
+        return _rag_fallback(
+            data, amount_key, "LLM not configured (using deterministic forecast).", retrieved
         )
 
+    # Unknown provider -> deterministic (safe default).
     return _rag_fallback(
-        data, amount_key, "No LLM configured (using deterministic forecast)."
+        data, amount_key, f"Unknown LLM_PROVIDER '{provider}'; using deterministic forecast.", retrieved
     )
 
 
@@ -485,11 +691,14 @@ def predict_next_month(
     category_context: list[dict] | None = None,
     budget: float | None = None,
 ) -> dict:
-    """Dự đoán tháng tiếp theo bằng RAG (LLM qua provider được cấu hình) truy xuất
-    lịch sử + danh mục.
+    """Dự đoán tháng tiếp theo.
+
+    Primary forecast is deterministic (Linear Regression / Holt). RAG retrieval
+    enriches the suggestions. An LLM is used only when explicitly opted in via
+    LLM_PROVIDER + credentials; otherwise — or on any failure — the deterministic
+    forecast is returned.
 
     Trả về dict: {predicted, explanation, suggestions, confidence, method}.
-    Nếu không có LLM / lỗi API / kết quả vô lý -> tự động fallback deterministic.
     """
     kind = "income" if amount_key == "total_income" else "expense"
     return rag_predict(

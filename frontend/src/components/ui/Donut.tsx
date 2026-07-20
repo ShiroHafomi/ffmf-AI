@@ -7,16 +7,16 @@ export interface DonutSlice {
 }
 
 const PALETTE = [
-  "#6366f1",
+  "#059669",
+  "#14b8a6",
   "#0ea5e9",
-  "#10b981",
+  "#8b5cf6",
   "#f59e0b",
   "#ef4444",
-  "#a855f7",
-  "#14b8a6",
   "#ec4899",
   "#84cc16",
   "#f97316",
+  "#06b6d4",
 ];
 
 export function Donut({

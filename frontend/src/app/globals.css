@@ -14,16 +14,16 @@
    that also flip. Brand accents stay constant.
    ─────────────────────────────────────────────────────────── */
 @theme {
-  --color-brand-50: #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-200: #c7d2fe;
-  --color-brand-300: #a5b4fc;
-  --color-brand-400: #818cf8;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
-  --color-brand-800: #3730a3;
-  --color-brand-900: #312e81;
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
 
   /* Light ink scale (default) */
   --color-ink-50: #f7f8fa;
@@ -42,7 +42,7 @@
   --radius-3xl: 1.5rem;
 
   --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 4px 16px -8px rgb(15 23 42 / 0.08);
-  --shadow-pop: 0 10px 30px -12px rgb(79 70 229 / 0.28);
+  --shadow-pop: 0 10px 30px -12px rgb(5 150 105 / 0.28);
   --shadow-float: 0 8px 30px -10px rgb(15 23 42 / 0.18);
 }
 
@@ -58,12 +58,12 @@
   --text-muted: #647084;
   --text-faint: #94a0b3;
   --on-brand: #ffffff;
-  --brand-soft: #eef2ff;
-  --brand-ink: #4f46e5;
+  --brand-soft: #ecfdf5;
+  --brand-ink: #047857;
   --field-bg: #ffffff;
   --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 4px 16px -8px rgb(15 23 42 / 0.08);
   --shadow-float: 0 8px 30px -10px rgb(15 23 42 / 0.18);
-  --shadow-pop: 0 10px 30px -12px rgb(79 70 229 / 0.28);
+  --shadow-pop: 0 10px 30px -12px rgb(5 150 105 / 0.28);
 }
 
 /* ── Dark mode: flip the ink scale + swap semantic vars ───── */
@@ -79,22 +79,22 @@
   --color-ink-800: #e7e9ee;
   --color-ink-900: #f4f6fa;
 
-  --bg: #0b0b0f;
-  --surface: #14161c;
-  --surface-2: #181b22;
-  --surface-hover: #1c1f27;
-  --border: #262a34;
-  --border-strong: #343a47;
-  --text: #f4f6fa;
+  --bg: #0a0f0d;
+  --surface: #111714;
+  --surface-2: #151c19;
+  --surface-hover: #182019;
+  --border: #212b26;
+  --border-strong: #2e3a34;
+  --text: #f1f6f3;
   --text-muted: #9aa3b2;
   --text-faint: #6b7280;
   --on-brand: #ffffff;
-  --brand-soft: #1e1b3a;
-  --brand-ink: #a5b4fc;
-  --field-bg: #181b22;
+  --brand-soft: #04221f;
+  --brand-ink: #6ee7b7;
+  --field-bg: #151c19;
   --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
   --shadow-float: 0 12px 40px -12px rgb(0 0 0 / 0.7);
-  --shadow-pop: 0 10px 30px -10px rgb(124 110 250 / 0.45);
+  --shadow-pop: 0 10px 30px -10px rgb(16 185 129 / 0.45);
 }
 
 @layer base {
@@ -335,7 +335,7 @@
 
   /* Brand gradient panel */
   .brand-gradient {
-    background-image: linear-gradient(135deg, #4f46e5 0%, #4338ca 45%, #6d28d9 100%);
+    background-image: linear-gradient(135deg, #10b981 0%, #0d9488 50%, #0f766e 100%);
   }
 
   /* Glassy translucent surface (topbar / overlays) — light only;
@@ -421,7 +421,7 @@
 
   /* Brand gradient clipped to text — for hero numbers / headings. */
   .gradient-text {
-    background-image: linear-gradient(135deg, #4f46e5 0%, #6d28d9 100%);
+    background-image: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
