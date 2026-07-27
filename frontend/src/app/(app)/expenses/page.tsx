@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useHouseholdData } from "@/context/HouseholdDataContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useAuth } from "@/context/AuthContext";
 import { useCan } from "@/lib/permissions";
 import { useToast } from "@/components/feedback/Toast";
 import { PageSkeleton } from "@/components/feedback/Skeleton";
-import { apiGetText } from "@/lib/api";
+import { apiGetText, API_BASE } from "@/lib/api";
 import {
   Card,
   CardHeader,
@@ -27,6 +27,7 @@ export default function ExpensesPage() {
     loading,
     busy,
     error,
+    loadAll,
     addExpense,
     setBudget,
     clearError,
@@ -45,7 +46,9 @@ export default function ExpensesPage() {
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [budAmount, setBudAmount] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function onExport() {
     setExporting(true);
@@ -62,6 +65,64 @@ export default function ExpensesPage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  async function onExportExcel() {
+    setExporting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/expenses/export/excel`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "expenses.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function onImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/api/expenses/import`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? t("exp.importFailed"));
+        return;
+      }
+      toast.success(
+        t("exp.importSuccess", {
+          count: String(data.imported ?? 0),
+          skipped: String(data.skipped ?? 0),
+        }),
+      );
+      await loadAll();
+    } catch {
+      toast.error(t("exp.importFailed"));
+    } finally {
+      setImporting(false);
+    }
+    // Reset the input so the same file can be re-selected
+    e.target.value = "";
+  }
+
+  function triggerImport() {
+    fileInputRef.current?.click();
   }
 
   const sorted = useMemo(
@@ -230,13 +291,36 @@ export default function ExpensesPage() {
               subtitle={t("exp.shown", { count: visible.length })}
               action={
                 <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={onImport}
+                  />
+                  <button
+                    onClick={triggerImport}
+                    disabled={importing}
+                    className="btn-ghost btn-sm"
+                    title={t("exp.importExcel")}
+                  >
+                    {importing ? t("exp.importing") : t("exp.importExcel")}
+                  </button>
                   <button
                     onClick={onExport}
                     disabled={exporting || visible.length === 0}
                     className="btn-ghost btn-sm"
                     title={t("exp.exportCsv")}
                   >
-                    {exporting ? t("common.loading") : t("exp.exportCsv")}
+                    {t("exp.exportCsv")}
+                  </button>
+                  <button
+                    onClick={onExportExcel}
+                    disabled={exporting || visible.length === 0}
+                    className="btn-ghost btn-sm"
+                    title={t("exp.exportExcel")}
+                  >
+                    {t("exp.exportExcel")}
                   </button>
                   <select
                     value={filter}

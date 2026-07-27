@@ -18,19 +18,13 @@ from services.ai_service import (
     predict_next_month,
     analyze,
     analyze_categories,
-    analyze_income,
     detect_anomalies,
     generate_savings_advice,
-    recommend_actions,
     suggest_cutbacks,
     evaluate_alert_thresholds,
     forecast_category_breakdown,
     backtest_forecast,
-    ensemble_forecast,
-    holt_winters_forecast,
     trend_analysis,
-    residual_based_interval,
-    deterministic_forecast,
 )
 from services.validation import (
     validate_household_id,
@@ -113,15 +107,10 @@ def forecast(
 
         # Category context for RAG enrichment (best-effort).
         category_expenses: list[dict] = []
-        category_budgets: list[dict] = []
         try:
             category_expenses = get_category_expenses(household_id, connection=conn)
-            category_budgets = get_category_budgets(household_id, connection=conn)
         except Exception:
             pass
-        current_month_total = (
-            sum(float(c["total"]) for c in category_expenses) if category_expenses else 0
-        )
 
         # Build multi-month forecast sequentially.
         forecasts: list[dict] = []

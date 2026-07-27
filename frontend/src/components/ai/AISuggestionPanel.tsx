@@ -6,13 +6,14 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useToast } from "@/components/feedback/Toast";
 import { Button, Card } from "@/components/ui";
 import { Icon } from "@/components/ui/Icon";
+import type { ActionRow, CutbackLever, AlertRow } from "@/context/HouseholdDataContext";
 
 interface AISuggestion {
   id: string;
   title: string;
   description: string;
   priority: "high" | "medium" | "low";
-  category: "saving" | "budget" | "spending" | "goal";
+  category: "saving" | "budget" | "spending" | "goal" | "tip";
 }
 
 const categoryIcons = {
@@ -20,6 +21,7 @@ const categoryIcons = {
   budget: "target",
   spending: "receipt",
   goal: "spark",
+  tip: "bulb",
 } as const;
 
 export function AISuggestionPanel({
@@ -48,12 +50,12 @@ export function AISuggestionPanel({
       });
       if (!res.ok) throw new Error("Failed to fetch insights");
       const data = (res.data ?? {}) as {
-        cutback_suggestions?: { levers?: AISuggestion[] };
-        recommended_actions?: AISuggestion[];
+        cutback_suggestions?: { levers?: CutbackLever[] };
+        recommended_actions?: ActionRow[];
         predictions?: {
           expense?: { suggestions?: string[] };
         };
-        alert_thresholds?: { result?: { alerts?: AISuggestion[] } };
+        alert_thresholds?: { result?: { alerts?: AlertRow[] } };
         savings?: { tip?: string };
       };
 

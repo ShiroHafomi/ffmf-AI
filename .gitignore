@@ -9,6 +9,7 @@ venv/
 env/
 .venv/
 
+
 # IDE
 .vscode/
 .idea/
@@ -37,6 +38,7 @@ Thumbs.db
 
 # Test caches only — the tests/ directory is committed and run in CI
 .pytest_cache/
+/scripts/seed_tranp9436.py
 
 # Node dependencies (never commit; reinstalled via npm ci)
 node_modules/

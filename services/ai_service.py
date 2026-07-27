@@ -53,7 +53,9 @@ def _load_rag_config() -> dict:
     """
     return {
         "provider": os.getenv("LLM_PROVIDER", "deterministic").strip().lower(),
-        "openai_base_url": os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").strip(),
+        "openai_base_url": os.getenv(
+            "LLM_BASE_URL", "https://api.groq.com/openai/v1"
+        ).strip(),
         "openai_model": os.getenv("LLM_MODEL", "llama-3.3-70b-versatile").strip(),
         "openai_api_key": os.getenv("LLM_API_KEY", "").strip(),
         "anthropic_model": os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL).strip(),
@@ -93,7 +95,9 @@ _RAG_SYSTEM = (
 
 
 # ───────────────────────── Linear regression (fallback) ─────────────────────────
-def linear_regression_predict(data: list[dict], amount_key: str = "total_expense") -> float:
+def linear_regression_predict(
+    data: list[dict], amount_key: str = "total_expense"
+) -> float:
     """Dự đoán bằng Linear Regression (dùng làm fallback tất định)."""
     totals = np.array([float(row[amount_key]) for row in data])
     X = np.arange(len(totals)).reshape(-1, 1)
@@ -107,7 +111,11 @@ def linear_regression_predict(data: list[dict], amount_key: str = "total_expense
 
 # ─────────────── Holt's double exponential smoothing (trend-aware) ───────────────
 def _holt_core(
-    totals: list[float], h: int = 1, alpha: float = 0.6, beta: float = 0.3, phi: float = 0.98
+    totals: list[float],
+    h: int = 1,
+    alpha: float = 0.6,
+    beta: float = 0.3,
+    phi: float = 0.98,
 ) -> dict:
     """Holt's damped double exponential smoothing (trend-aware).
 
@@ -129,11 +137,20 @@ def _holt_core(
         last_level = level
         level = alpha * y + (1 - alpha) * (level + phi * trend)
         trend = beta * (level - last_level) + (1 - beta) * trend
-    return {"pred": level + h * phi * trend, "fitted": fitted, "level": level, "trend": trend}
+    return {
+        "pred": level + h * phi * trend,
+        "fitted": fitted,
+        "level": level,
+        "trend": trend,
+    }
 
 
 def holt_forecast(
-    totals: list[float], h: int = 1, alpha: float = 0.6, beta: float = 0.3, phi: float = 0.98
+    totals: list[float],
+    h: int = 1,
+    alpha: float = 0.6,
+    beta: float = 0.3,
+    phi: float = 0.98,
 ) -> float:
     """Dự báo chuỗi bằng Holt (cấp độ + xu hướng), tốt hơn Linear Regression
     khi chuỗi có xu hướng phi tuyến nhẹ. Mặc định dùng damped trend (phi=0.98)
@@ -182,7 +199,10 @@ def deterministic_forecast(
     if n < 2:
         return 0.0, "fallback_none"
     if n < 6:
-        return round(float(linear_regression_predict(data, amount_key)), 2), "fallback_linear_regression"
+        return (
+            round(float(linear_regression_predict(data, amount_key)), 2),
+            "fallback_linear_regression",
+        )
 
     base = holt_forecast(totals)
     method = "fallback_holt"
@@ -329,7 +349,9 @@ def _z_for_confidence(confidence: str) -> float:
     Callers map an honest confidence level to a z-multiplier: low confidence
     (short or choppy history) gets the widest band, high confidence the narrow.
     """
-    return {"high": 1.28, "medium": 1.645, "low": 1.96}.get(str(confidence).lower(), 1.645)
+    return {"high": 1.28, "medium": 1.645, "low": 1.96}.get(
+        str(confidence).lower(), 1.645
+    )
 
 
 def _prediction_interval(
@@ -419,11 +441,11 @@ def _holt_winters_core(
         # Initial seasonal indices from the first full cycle.
         first_cycle = totals[:sp]
         cycle_avg = sum(first_cycle) / sp
-        initial_seasonal = [v / cycle_avg for v in first_cycle] if cycle_avg != 0 else [1.0] * sp
+        initial_seasonal = (
+            [v / cycle_avg for v in first_cycle] if cycle_avg != 0 else [1.0] * sp
+        )
         # Initial level = average of first cycle / seasonal.
-        initial_level = sum(
-            v / s for v, s in zip(first_cycle, initial_seasonal)
-        ) / sp
+        initial_level = sum(v / s for v, s in zip(first_cycle, initial_seasonal)) / sp
         # Initial trend = average of between-cycle differences.
         if n >= 2 * sp:
             second_cycle = totals[sp : 2 * sp]
@@ -449,16 +471,22 @@ def _holt_winters_core(
             if sp > 0:
                 s_idx = i % sp
                 sm = seasonal[s_idx]
-                level = alpha * (y / sm if multiplicative else y - sm) + (1 - alpha) * (last_level + trend)
+                level = alpha * (y / sm if multiplicative else y - sm) + (1 - alpha) * (
+                    last_level + trend
+                )
             else:
                 level = alpha * y + (1 - alpha) * (last_level + trend)
             trend = beta * (level - last_level) + (1 - beta) * trend
             if sp > 0:
                 s_idx = i % sp
                 if multiplicative:
-                    seasonal[s_idx] = gamma * (y / level) + (1 - gamma) * seasonal[s_idx]
+                    seasonal[s_idx] = (
+                        gamma * (y / level) + (1 - gamma) * seasonal[s_idx]
+                    )
                 else:
-                    seasonal[s_idx] = gamma * (y - level) + (1 - gamma) * seasonal[s_idx]
+                    seasonal[s_idx] = (
+                        gamma * (y - level) + (1 - gamma) * seasonal[s_idx]
+                    )
             fitted.append(level + trend + (seasonal[i % sp] if sp else 0))
             continue
 
@@ -466,7 +494,9 @@ def _holt_winters_core(
         if sp > 0:
             s_idx = i % sp
             sm = seasonal[s_idx]
-            level = alpha * (y / sm if multiplicative else y - sm) + (1 - alpha) * (last_level + trend)
+            level = alpha * (y / sm if multiplicative else y - sm) + (1 - alpha) * (
+                last_level + trend
+            )
         else:
             level = alpha * y + (1 - alpha) * (last_level + trend)
         trend = beta * (level - last_level) + (1 - beta) * trend
@@ -481,11 +511,21 @@ def _holt_winters_core(
     # h-step forecast.
     if sp > 0:
         seasonal_term = [seasonal[(n + j) % sp] for j in range(h)]
-        forecast = level + h * trend + sum(seasonal_term) if multiplicative else level + h * trend + sum(seasonal_term)
+        forecast = (
+            level + h * trend + sum(seasonal_term)
+            if multiplicative
+            else level + h * trend + sum(seasonal_term)
+        )
     else:
         forecast = level + h * trend
 
-    return {"pred": forecast, "fitted": fitted, "level": level, "trend": trend, "seasonal": seasonal}
+    return {
+        "pred": forecast,
+        "fitted": fitted,
+        "level": level,
+        "trend": trend,
+        "seasonal": seasonal,
+    }
 
 
 def holt_winters_forecast(
@@ -500,7 +540,11 @@ def holt_winters_forecast(
     prediction. Falls back to Holt when there are fewer than
     2*seasonal_period points."""
     result = _holt_winters_core(
-        totals, h=h, alpha=alpha, beta=beta, gamma=gamma,
+        totals,
+        h=h,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
         seasonal_period=seasonal_period,
     )
     return round(float(result["pred"]), 2)
@@ -665,8 +709,6 @@ def trend_analysis(
     lr.fit(x, amounts)
     r2 = float(lr.score(x, amounts))
     slope = float(lr.coef_[0])
-    intercept = float(lr.intercept_)
-
     # Slope as percentage of the mean (normalised direction strength).
     mean_val = float(np.mean(amounts))
     slope_pct = (slope / (mean_val or 1.0)) * 100
@@ -789,7 +831,9 @@ def _deterministic_explanation(method: str, totals: list[float]) -> str:
     label = _METHOD_LABELS.get(method, "deterministic model")
     if len(totals) >= 2:
         first, last = totals[0], totals[-1]
-        direction = "rising" if last > first else ("falling" if last < first else "flat")
+        direction = (
+            "rising" if last > first else ("falling" if last < first else "flat")
+        )
         return f"Forecast via {label}; recent trend is {direction} ({first:,.0f} -> {last:,.0f})."
     return f"Forecast via {label}."
 
@@ -813,9 +857,15 @@ def _rag_fallback(
     per_model: dict = {}
     try:
         pred, ensemble_method, per_model = ensemble_forecast(data, amount_key)
-        method = ensemble_method if ensemble_method != "ensemble_fallback_none" else "fallback_none"
+        method = (
+            ensemble_method
+            if ensemble_method != "ensemble_fallback_none"
+            else "fallback_none"
+        )
     except Exception as e:  # noqa: BLE001
-        logger.error("Ensemble forecast failed; trying deterministic. %s", type(e).__name__)
+        logger.error(
+            "Ensemble forecast failed; trying deterministic. %s", type(e).__name__
+        )
         try:
             pred, method = deterministic_forecast(data, amount_key)
         except Exception:  # noqa: BLE001
@@ -823,7 +873,9 @@ def _rag_fallback(
             pred, method = 0.0, "fallback_error"
 
     totals = [float(r.get(amount_key, 0)) for r in data]
-    confidence = "low" if method == "fallback_error" else _deterministic_confidence(totals)
+    confidence = (
+        "low" if method == "fallback_error" else _deterministic_confidence(totals)
+    )
     # Use residual-based intervals for better uncertainty quantification.
     interval = residual_based_interval(data, pred, confidence, amount_key)
 
@@ -949,15 +1001,21 @@ def _get_anthropic_client(api_key: str):
 
 
 def _rag_predict_anthropic(
-    data, amount_key, category_context, budget, kind, api_key,
+    data,
+    amount_key,
+    category_context,
+    budget,
+    kind,
+    api_key,
     retrieved_knowledge=None,
 ) -> dict:
     """Gọi Claude (Anthropic). Chỉ chạy khi ANTHROPIC_API_KEY được set."""
     try:
         import anthropic
     except ImportError:
-        return _rag_fallback(data, amount_key, "anthropic SDK not installed.",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data, amount_key, "anthropic SDK not installed.", retrieved_knowledge
+        )
 
     model = _CONFIG["anthropic_model"]
     context = _build_retrieval_context(
@@ -985,27 +1043,41 @@ def _rag_predict_anthropic(
             messages=[{"role": "user", "content": context}],
         )
     except anthropic.APIError as e:
-        logger.warning("Claude API error (%s); falling back to deterministic.", type(e).__name__)
-        return _rag_fallback(data, amount_key, f"Claude API error: {type(e).__name__}.",
-                             retrieved_knowledge)
+        logger.warning(
+            "Claude API error (%s); falling back to deterministic.", type(e).__name__
+        )
+        return _rag_fallback(
+            data,
+            amount_key,
+            f"Claude API error: {type(e).__name__}.",
+            retrieved_knowledge,
+        )
     except Exception as e:  # noqa: BLE001 — bất kỳ lỗi nào cũng fallback
-        logger.warning("Claude call failed (%s); falling back to deterministic.", type(e).__name__)
-        return _rag_fallback(data, amount_key, f"Claude call failed: {type(e).__name__}.",
-                             retrieved_knowledge)
+        logger.warning(
+            "Claude call failed (%s); falling back to deterministic.", type(e).__name__
+        )
+        return _rag_fallback(
+            data,
+            amount_key,
+            f"Claude call failed: {type(e).__name__}.",
+            retrieved_knowledge,
+        )
 
     # Claude có thể từ chối (refusal) — coi như thất bại, fallback.
     if getattr(resp, "stop_reason", None) == "refusal":
         logger.warning("Claude refused the request; falling back to deterministic.")
-        return _rag_fallback(data, amount_key, "Model refused the request.",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data, amount_key, "Model refused the request.", retrieved_knowledge
+        )
 
     tool_use = next(
         (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
     )
     if not tool_use:
         logger.warning("No tool_use block from Claude; falling back to deterministic.")
-        return _rag_fallback(data, amount_key, "No tool_use block in response.",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data, amount_key, "No tool_use block in response.", retrieved_knowledge
+        )
     logger.info("RAG prediction generated via Claude (%s).", model)
     return _finalize_rag(tool_use.input, data, amount_key, "")
 
@@ -1021,8 +1093,9 @@ def _rag_predict_openai_compatible(
     try:
         from openai import OpenAI
     except ImportError:
-        return _rag_fallback(data, amount_key, "openai SDK not installed.",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data, amount_key, "openai SDK not installed.", retrieved_knowledge
+        )
 
     base_url = _CONFIG["openai_base_url"]
     api_key = _CONFIG["openai_api_key"]
@@ -1031,9 +1104,12 @@ def _rag_predict_openai_compatible(
     # Ollama local không cần key; cloud provider (Groq/Together/...) cần LLM_API_KEY.
     is_local = any(t in base_url for t in ("localhost", "127.0.0.1", ":11434"))
     if not base_url or not model or (not api_key and not is_local):
-        return _rag_fallback(data, amount_key,
-                             "LLM not configured (using deterministic forecast).",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data,
+            amount_key,
+            "LLM not configured (using deterministic forecast).",
+            retrieved_knowledge,
+        )
 
     context = _build_retrieval_context(
         data, amount_key, category_context, budget, kind, retrieved_knowledge
@@ -1057,22 +1133,30 @@ def _rag_predict_openai_compatible(
             tool_choice={"type": "function", "function": {"name": "report_prediction"}},
         )
     except Exception as e:  # noqa: BLE001 — mọi lỗi đều fallback
-        logger.warning("LLM call failed (%s); falling back to deterministic.", type(e).__name__)
-        return _rag_fallback(data, amount_key, f"LLM call failed: {type(e).__name__}.",
-                             retrieved_knowledge)
+        logger.warning(
+            "LLM call failed (%s); falling back to deterministic.", type(e).__name__
+        )
+        return _rag_fallback(
+            data,
+            amount_key,
+            f"LLM call failed: {type(e).__name__}.",
+            retrieved_knowledge,
+        )
 
     msg = resp.choices[0].message
     if not getattr(msg, "tool_calls", None):
         logger.warning("No tool_calls from LLM; falling back to deterministic.")
-        return _rag_fallback(data, amount_key, "No tool_calls in response.",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data, amount_key, "No tool_calls in response.", retrieved_knowledge
+        )
     try:
         import json
 
         args = json.loads(msg.tool_calls[0].function.arguments or "{}")
     except (ValueError, AttributeError):
-        return _rag_fallback(data, amount_key, "Could not parse tool arguments.",
-                             retrieved_knowledge)
+        return _rag_fallback(
+            data, amount_key, "Could not parse tool arguments.", retrieved_knowledge
+        )
     logger.info("RAG prediction generated via OpenAI-compatible LLM (%s).", model)
     return _finalize_rag(args, data, amount_key, "")
 
@@ -1132,11 +1216,19 @@ def rag_predict(
         anthropic_key = _CONFIG["anthropic_api_key"]
         if anthropic_key:
             return _rag_predict_anthropic(
-                data, amount_key, category_context, budget, kind,
-                anthropic_key, retrieved,
+                data,
+                amount_key,
+                category_context,
+                budget,
+                kind,
+                anthropic_key,
+                retrieved,
             )
         return _rag_fallback(
-            data, amount_key, "Claude opted-in but ANTHROPIC_API_KEY not set.", retrieved
+            data,
+            amount_key,
+            "Claude opted-in but ANTHROPIC_API_KEY not set.",
+            retrieved,
         )
 
     # Opt-in free cloud LLM (Groq/Together/OpenRouter/Ollama).
@@ -1146,12 +1238,18 @@ def rag_predict(
                 data, amount_key, category_context, budget, kind, retrieved
             )
         return _rag_fallback(
-            data, amount_key, "LLM not configured (using deterministic forecast).", retrieved
+            data,
+            amount_key,
+            "LLM not configured (using deterministic forecast).",
+            retrieved,
         )
 
     # Unknown provider -> deterministic (safe default).
     return _rag_fallback(
-        data, amount_key, f"Unknown LLM_PROVIDER '{provider}'; using deterministic forecast.", retrieved
+        data,
+        amount_key,
+        f"Unknown LLM_PROVIDER '{provider}'; using deterministic forecast.",
+        retrieved,
     )
 
 
@@ -1286,7 +1384,9 @@ def analyze_categories(
         count = int(cat["transaction_count"])
         budget = budget_map.get(name)
 
-        pct_of_total = round((spent / total_expense * 100), 1) if total_expense > 0 else 0
+        pct_of_total = (
+            round((spent / total_expense * 100), 1) if total_expense > 0 else 0
+        )
 
         cat_info = {
             "name": name,
@@ -1314,32 +1414,38 @@ def analyze_categories(
     suggestions = []
 
     for cat in overspent:
-        suggestions.append({
-            "type": "overspent",
-            "category": cat["name"],
-            "spent": cat["spent"],
-            "budget": cat["budget"],
-            "over_amount": cat["over_amount"],
-            "budget_usage": cat["budget_usage"],
-        })
+        suggestions.append(
+            {
+                "type": "overspent",
+                "category": cat["name"],
+                "spent": cat["spent"],
+                "budget": cat["budget"],
+                "over_amount": cat["over_amount"],
+                "budget_usage": cat["budget_usage"],
+            }
+        )
 
     for cat in high_spend:
         if cat["name"] not in [s["category"] for s in suggestions]:
-            suggestions.append({
-                "type": "high_ratio",
-                "category": cat["name"],
-                "spent": cat["spent"],
-                "percent_of_total": cat["percent_of_total"],
-            })
+            suggestions.append(
+                {
+                    "type": "high_ratio",
+                    "category": cat["name"],
+                    "spent": cat["spent"],
+                    "percent_of_total": cat["percent_of_total"],
+                }
+            )
 
     if total_budget > 0 and total_expense > 0:
         overall_usage = round((total_expense / total_budget * 100), 1)
-        suggestions.append({
-            "type": "overall",
-            "total_expense": total_expense,
-            "total_budget": total_budget,
-            "usage_percent": overall_usage,
-        })
+        suggestions.append(
+            {
+                "type": "overall",
+                "total_expense": total_expense,
+                "total_budget": total_budget,
+                "usage_percent": overall_usage,
+            }
+        )
 
     return {
         "categories": categories,
@@ -1366,7 +1472,11 @@ def forecast_category_breakdown(
     for r in category_monthly:
         name = r.get("category_name") or "Other"
         by_cat[name].append(
-            {"yr": int(r.get("yr", 0)), "month": int(r.get("month", 0)), "total": float(r.get(amount_key, 0))}
+            {
+                "yr": int(r.get("yr", 0)),
+                "month": int(r.get("month", 0)),
+                "total": float(r.get(amount_key, 0)),
+            }
         )
 
     out: list[dict] = []
@@ -1433,7 +1543,9 @@ def backtest_forecast(
     ens_preds: list[float] = []
     acts: list[float] = []
     for i in range(min_train, n_total):
-        window = [{"yr": 0, "month": j, amount_key: v} for j, v in enumerate(totals[:i])]
+        window = [
+            {"yr": 0, "month": j, amount_key: v} for j, v in enumerate(totals[:i])
+        ]
 
         # Deterministic forecaster (original method).
         p_det, _ = deterministic_forecast(window, amount_key)
@@ -1457,7 +1569,8 @@ def backtest_forecast(
         rmse = float(np.sqrt(np.mean([e * e for e in errs]))) if errs else 0.0
         mape = (
             float(np.mean([abs(e / a) * 100 for e, a in zip(errs, acts) if a]))
-            if acts else 0.0
+            if acts
+            else 0.0
         )
         nmae = float(np.mean([abs(e) for e in nerrs])) if nerrs else 0.0
         skill = round(1 - mae / nmae, 3) if nmae else None
@@ -1475,10 +1588,14 @@ def backtest_forecast(
     ens_metrics = _metrics(ens_preds, "ensemble_walk_forward")
 
     # Pick the winner for the overall verdict.
-    winner = "ensemble" if ens_metrics["skill_vs_naive"] and (
-        not det_metrics["skill_vs_naive"]
-        or ens_metrics["mae"] < det_metrics["mae"]
-    ) else "deterministic"
+    winner = (
+        "ensemble"
+        if ens_metrics["skill_vs_naive"]
+        and (
+            not det_metrics["skill_vs_naive"] or ens_metrics["mae"] < det_metrics["mae"]
+        )
+        else "deterministic"
+    )
 
     return {
         "winner": winner,
@@ -1516,18 +1633,20 @@ def suggest_cutbacks(categories: list[dict]) -> dict:
             continue
 
         total_potential_saving += over
-        levers.append({
-            "lever": name,
-            "current_spent": round(spent, 2),
-            "budget": round(float(budget), 2),
-            "excess": round(over, 2),
-            "suggested_cutback": round(over, 2),
-            "projected_spent": round(float(budget), 2),
-            "message": (
-                f"Cắt giảm {over:,.0f} ở '{name}' để đưa chi tiêu "
-                f"về đúng ngân sách {float(budget):,.0f}."
-            ),
-        })
+        levers.append(
+            {
+                "lever": name,
+                "current_spent": round(spent, 2),
+                "budget": round(float(budget), 2),
+                "excess": round(over, 2),
+                "suggested_cutback": round(over, 2),
+                "projected_spent": round(float(budget), 2),
+                "message": (
+                    f"Cắt giảm {over:,.0f} ở '{name}' để đưa chi tiêu "
+                    f"về đúng ngân sách {float(budget):,.0f}."
+                ),
+            }
+        )
 
     levers.sort(key=lambda s: s["excess"], reverse=True)
     return {
@@ -1571,18 +1690,20 @@ def evaluate_alert_thresholds(
 
         if usage >= thr:
             severity = "high" if usage >= max(thr, 100) else "warning"
-            alerts.append({
-                "lever": name,
-                "budget_usage": round(float(usage), 1),
-                "threshold": thr,
-                "spent": round(float(cat.get("spent", 0)), 2),
-                "budget": round(float(budget), 2),
-                "severity": severity,
-                "message": (
-                    f"'{name}' đã dùng {usage:.1f}% ngân sách, "
-                    f"vượt ngưỡng cảnh báo {thr}%."
-                ),
-            })
+            alerts.append(
+                {
+                    "lever": name,
+                    "budget_usage": round(float(usage), 1),
+                    "threshold": thr,
+                    "spent": round(float(cat.get("spent", 0)), 2),
+                    "budget": round(float(budget), 2),
+                    "severity": severity,
+                    "message": (
+                        f"'{name}' đã dùng {usage:.1f}% ngân sách, "
+                        f"vượt ngưỡng cảnh báo {thr}%."
+                    ),
+                }
+            )
 
     alerts.sort(key=lambda a: a["budget_usage"], reverse=True)
     return {
@@ -1611,15 +1732,19 @@ def detect_anomalies(
         if amt > median * rel_threshold or amt < median / rel_threshold:
             direction = "high" if amt > median else "low"
             deviation = round((amt - median) / median * 100, 1)
-            anomalies.append({
-                "month": f"{int(row['yr'])}-{int(row['month']):02d}",
-                "amount": round(amt, 2),
-                "median": round(median, 2),
-                "deviation_percent": deviation,
-                "direction": direction,
-            })
+            anomalies.append(
+                {
+                    "month": f"{int(row['yr'])}-{int(row['month']):02d}",
+                    "amount": round(amt, 2),
+                    "median": round(median, 2),
+                    "deviation_percent": deviation,
+                    "direction": direction,
+                }
+            )
 
-    anomalies.sort(key=lambda a: (a["direction"] != "high", -abs(a["deviation_percent"])))
+    anomalies.sort(
+        key=lambda a: (a["direction"] != "high", -abs(a["deviation_percent"]))
+    )
     return anomalies
 
 
@@ -1681,46 +1806,60 @@ def recommend_actions(
     actions: list[dict] = []
 
     if analysis.get("status") == "abnormal":
-        actions.append({
-            "type": "spending_spike",
-            "priority": "high",
-            "text": analysis.get("suggestion", ""),
-        })
+        actions.append(
+            {
+                "type": "spending_spike",
+                "priority": "high",
+                "text": analysis.get("suggestion", ""),
+            }
+        )
     if analysis.get("status") == "warning":
-        actions.append({
-            "type": "budget",
-            "priority": "high",
-            "text": analysis.get("suggestion", ""),
-        })
+        actions.append(
+            {
+                "type": "budget",
+                "priority": "high",
+                "text": analysis.get("suggestion", ""),
+            }
+        )
 
     for cat in category_analysis.get("overspent_categories", []):
-        actions.append({
-            "type": "category_overspend",
-            "priority": "medium",
-            "text": (
-                f"{cat['name']} vượt ngân sách {cat['over_amount']:,.0f} "
-                f"({cat['budget_usage']}% đã dùng)."
-            ),
-        })
+        actions.append(
+            {
+                "type": "category_overspend",
+                "priority": "medium",
+                "text": (
+                    f"{cat['name']} vượt ngân sách {cat['over_amount']:,.0f} "
+                    f"({cat['budget_usage']}% đã dùng)."
+                ),
+            }
+        )
 
     for a in anomalies:
         if a["direction"] == "high":
-            actions.append({
-                "type": "anomaly",
-                "priority": "medium",
-                "text": f"Chi tiêu bất thường cao {a['amount']:,.0f} vào tháng {a['month']} (lệch {a['deviation_percent']}% so với mức điển hình).",
-            })
+            actions.append(
+                {
+                    "type": "anomaly",
+                    "priority": "medium",
+                    "text": f"Chi tiêu bất thường cao {a['amount']:,.0f} vào tháng {a['month']} (lệch {a['deviation_percent']}% so với mức điển hình).",
+                }
+            )
         else:
-            actions.append({
-                "type": "anomaly",
-                "priority": "medium",
-                "text": f"Chi tiêu bất thường thấp {a['amount']:,.0f} vào tháng {a['month']} (lệch {a['deviation_percent']}% so với mức điển hình).",
-            })
+            actions.append(
+                {
+                    "type": "anomaly",
+                    "priority": "medium",
+                    "text": f"Chi tiêu bất thường thấp {a['amount']:,.0f} vào tháng {a['month']} (lệch {a['deviation_percent']}% so với mức điển hình).",
+                }
+            )
 
     if savings.get("status") == "deficit":
-        actions.append({"type": "savings", "priority": "high", "text": savings.get("tip", "")})
+        actions.append(
+            {"type": "savings", "priority": "high", "text": savings.get("tip", "")}
+        )
     elif savings.get("status") == "surplus":
-        actions.append({"type": "savings", "priority": "low", "text": savings.get("tip", "")})
+        actions.append(
+            {"type": "savings", "priority": "low", "text": savings.get("tip", "")}
+        )
 
     order = {"high": 0, "medium": 1, "low": 2}
     actions.sort(key=lambda x: order.get(x["priority"], 3))

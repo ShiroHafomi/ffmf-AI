@@ -56,6 +56,26 @@ export interface Goal {
   current_amount: number;
   created_at: string;
 }
+export type AlertRow = {
+  id?: string;
+  lever?: string;
+  budget_usage?: number;
+  threshold?: number;
+  spent?: number;
+  budget?: number;
+  severity?: string;
+  message?: string;
+};
+
+export type CutbackLever = {
+  id?: string;
+  lever?: string;
+  excess?: number;
+  suggested_cutback?: number;
+  budget?: number;
+  message?: string;
+};
+
 export interface Insights {
   household_id?: number;
   predictions?: {
@@ -68,6 +88,16 @@ export interface Insights {
   savings?: { surplus?: number | null; status?: string; tip?: string };
   recommended_actions?: ActionRow[];
   category_analysis?: CategoryAnalysis;
+  cutback_suggestions?: {
+    levers?: CutbackLever[];
+    total_potential_saving?: number;
+    count?: number;
+  };
+  alert_thresholds?: {
+    default_threshold?: number;
+    per_lever_thresholds?: Record<string, number>;
+    result?: { alerts?: AlertRow[]; evaluated?: number };
+  };
 }
 
 type PredictionBreakdown = {
@@ -88,7 +118,7 @@ type AnomalyRow = {
   direction?: string;
 };
 
-type ActionRow = { type?: string; priority?: string; text?: string };
+export type ActionRow = { id?: string; type?: string; priority?: string; text?: string };
 
 type CategoryAnalysis = {
   categories?: {

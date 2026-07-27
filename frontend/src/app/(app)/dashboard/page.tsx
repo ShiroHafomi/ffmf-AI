@@ -19,9 +19,39 @@ import {
   ProgressBar,
   EmptyState,
   Icon,
+  type IconName,
 } from "@/components/ui";
 import { aggregateByMonth, fmtMoney, fmtDate } from "@/lib/format";
 import { AISuggestionPanel } from "@/components/ai/AISuggestionPanel";
+
+type GoalsAdd = (name: string, target: number, current?: number) => Promise<void>;
+
+function QuickActionBtn({
+  icon,
+  label,
+  onClick,
+  accent = "brand",
+}: {
+  icon: IconName;
+  label: string;
+  onClick: () => void;
+  accent?: string;
+}) {
+  const accentMap: Record<string, string> = {
+    brand: "text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-soft",
+    emerald: "text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10",
+    amber: "text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/10",
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-xl border border-ink-200 bg-surface px-3 py-2 text-sm font-medium transition hover:shadow-sm dark:border-ink-700 ${accentMap[accent] ?? accentMap.brand}`}
+    >
+      <Icon name={icon} className="h-4 w-4" />
+      {label}
+    </button>
+  );
+}
 
 export default function DashboardPage() {
   const {
@@ -67,6 +97,10 @@ export default function DashboardPage() {
   const forecast = pred?.predicted
     ? { label: t("common.forecast"), value: Number(pred.predicted) }
     : undefined;
+  const predictionSuggestions = insights?.predictions?.expense?.suggestions ?? [];
+  const alerts = insights?.alert_thresholds?.result?.alerts ?? [];
+  const savings = insights?.savings;
+  const hasData = expenses.length > 0;
 
   const recent = [...expenses]
     .sort((a, b) => (b.expense_date ?? "").localeCompare(a.expense_date ?? ""))
@@ -158,7 +192,6 @@ export default function DashboardPage() {
           <p className="mt-3 text-sm text-ink-400 dark:text-ink-500">{t("dash.add3Months")}</p>
         )}
       </Card>
-
       {/* AI Suggestion Panel — distinct, standalone AI-powered feature */}
       <AISuggestionPanel householdId={household?.id} onRefresh={loadAll} />
 
@@ -232,6 +265,52 @@ export default function DashboardPage() {
       </div>
 
       <GoalsCard goals={goals} canManage={canManage} onAdd={addGoal} busy={busy} />
+
+
+      {/* Prediction-based suggestions */}
+      {predictionSuggestions.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
+            {t("dash.suggestions.tip")}
+          </h4>
+          {predictionSuggestions.map((s: string, i: number) => (
+            <div
+              key={i}
+              className="flex items-start gap-2.5 rounded-xl bg-brand-50 p-3 text-sm dark:bg-brand-soft/20"
+            >
+              <Icon name="bulb" className="h-5 w-5 shrink-0 text-brand-500 dark:text-brand-400" />
+              <span className="text-ink-700 dark:text-ink-300">{s}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Budget alerts */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
+            {t("dash.suggestions.alert")}
+          </h4>
+          {alerts.map((a, i) => (
+            <div
+              key={i}
+              className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm dark:bg-amber-500/10"
+            >
+              <Icon
+                name="alert"
+                className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-400"
+              />
+              <span className="text-ink-700 dark:text-ink-300">{a.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {savings?.tip && !hasData && (
+        <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/80 p-3 text-sm text-emerald-800 dark:border-emerald-400 dark:bg-emerald-500/10 dark:text-emerald-300">
+          {savings.tip}
+        </div>
+      )}
     </div>
   );
 }
@@ -459,8 +538,6 @@ function MembersPanel({
   );
 }
 
-type GoalsAdd = (name: string, target: number, current?: number) => Promise<void>;
-
 function GoalsCard({
   goals,
   canManage,
@@ -568,198 +645,6 @@ function GoalsCard({
             {busy ? t("common.loading") : t("goals.addBtn")}
           </button>
         </form>
-      )}
-    </Card>
-  );
-}
-
-function QuickActionBtn({
-  icon,
-  label,
-  onClick,
-  accent = "brand",
-}: {
-  icon: string;
-  label: string;
-  onClick: () => void;
-  accent?: string;
-}) {
-  const accentMap: Record<string, string> = {
-    brand: "text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-soft",
-    emerald: "text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10",
-    amber: "text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/10",
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-xl border border-ink-200 bg-surface px-3 py-2 text-sm font-medium transition hover:shadow-sm dark:border-ink-700 ${accentMap[accent] ?? accentMap.brand}`}
-    >
-      <Icon name={icon as "plus" | "receipt" | "target" | "spark"} className="h-4 w-4" />
-      {label}
-    </button>
-  );
-}
-
-function AISuggestions({
-  insights,
-  householdId,
-  onRefresh,
-}: {
-  insights: any;
-  householdId?: number;
-  onRefresh: () => Promise<void>;
-}) {
-  const { t } = useLanguage();
-  const toast = useToast();
-  const { authFetch } = useAuth();
-  const [busy, setBusy] = useState(false);
-
-  const cutbacks = insights?.cutback_suggestions?.levers ?? [];
-  const actions = insights?.recommended_actions ?? [];
-  const savings = insights?.savings;
-  const predictionSuggestions = insights?.predictions?.expense?.suggestions ?? [];
-  const alerts = insights?.alert_thresholds?.result?.alerts ?? [];
-
-  const hasData =
-    cutbacks.length > 0 ||
-    actions.length > 0 ||
-    savings != null ||
-    predictionSuggestions.length > 0 ||
-    alerts.length > 0;
-
-  async function refresh() {
-    if (!householdId) return;
-    setBusy(true);
-    try {
-      await authFetch(`/api/insights/${householdId}`, { method: "GET" });
-      await onRefresh();
-      toast.success(t("toast.insightsRefreshed") || "Insights refreshed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card className="card-pad border-l-4 border-l-brand-500 bg-gradient-to-br from-brand-50/60 to-surface dark:from-brand-soft/10 dark:to-surface">
-      <CardHeader
-        title={t("dash.aiSuggestions")}
-        subtitle={t("dash.aiSuggestionsSub")}
-        action={
-          <button
-            onClick={refresh}
-            disabled={busy}
-            className="btn-ghost btn-sm"
-          >
-            {busy ? t("common.loading") : t("dash.suggestions.refresh")}
-          </button>
-        }
-      />
-
-      {!hasData && !busy && (
-        <EmptyState
-          title={t("dash.suggestions.noData")}
-          hint={t("dash.suggestions.noInsights")}
-        />
-      )}
-
-      {busy && (
-        <div className="flex items-center gap-2 text-sm text-ink-400 dark:text-ink-500">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-ink-300 border-t-brand-600" />
-          {t("dash.suggestions.loading")}
-        </div>
-      )}
-
-      {/* Cutback suggestions */}
-      {cutbacks.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
-            {t("dash.suggestions.cutback")}
-          </h4>
-          {cutbacks.map((c: { lever: string; excess: number; suggested_cutback: number; projected_spent: number; message: string }) => (
-            <div
-              key={c.lever}
-              className="flex items-start gap-2.5 rounded-xl bg-red-50 p-3 text-sm dark:bg-red-500/10"
-            >
-              <Icon name="trendDown" className="h-5 w-5 shrink-0 text-red-500 dark:text-red-400" />
-              <span className="text-ink-700 dark:text-ink-300">{c.message}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Recommended actions */}
-      {actions.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
-            {t("dash.suggestions.action")}
-          </h4>
-          {actions.map((a: { type?: string; priority?: string; text?: string }, i: number) => (
-            <div
-              key={i}
-              className={`flex items-start gap-2.5 rounded-xl p-3 text-sm ${
-                a.priority === "high"
-                  ? "bg-red-50 dark:bg-red-500/10"
-                  : a.priority === "medium"
-                  ? "bg-amber-50 dark:bg-amber-500/10"
-                  : "bg-emerald-50 dark:bg-emerald-500/10"
-              }`}
-            >
-              <Icon
-                name={a.priority === "high" ? "alert" : a.priority === "medium" ? "bolt" : "check"}
-                className={`h-5 w-5 shrink-0 ${
-                  a.priority === "high"
-                    ? "text-red-500 dark:text-red-400"
-                    : a.priority === "medium"
-                    ? "text-amber-500 dark:text-amber-400"
-                    : "text-emerald-500 dark:text-emerald-400"
-                }`}
-              />
-              <span className="text-ink-700 dark:text-ink-300">{a.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Prediction-based suggestions */}
-      {predictionSuggestions.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
-            {t("dash.suggestions.tip")}
-          </h4>
-          {predictionSuggestions.map((s: string, i: number) => (
-            <div
-              key={i}
-              className="flex items-start gap-2.5 rounded-xl bg-brand-50 p-3 text-sm dark:bg-brand-soft/20"
-            >
-              <Icon name="bulb" className="h-5 w-5 shrink-0 text-brand-500 dark:text-brand-400" />
-              <span className="text-ink-700 dark:text-ink-300">{s}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Budget alerts */}
-      {alerts.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
-            {t("dash.suggestions.alert")}
-          </h4>
-          {alerts.map((a: { lever: string; budget_usage: number; threshold: number; message: string }, i: number) => (
-            <div
-              key={i}
-              className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm dark:bg-amber-500/10"
-            >
-              <Icon name="alert" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-400" />
-              <span className="text-ink-700 dark:text-ink-300">{a.message}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {savings?.tip && !hasData && (
-        <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/80 p-3 text-sm text-emerald-800 dark:border-emerald-400 dark:bg-emerald-500/10 dark:text-emerald-300">
-          {savings.tip}
-        </div>
       )}
     </Card>
   );

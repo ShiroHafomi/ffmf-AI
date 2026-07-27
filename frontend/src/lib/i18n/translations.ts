@@ -143,6 +143,13 @@ export const translations: Record<Locale, Dict> = {
     "exp.budgetByCategory": "Budget by category",
     "exp.noCategoryBudgets": "No per-category budgets set yet.",
     "exp.exportCsv": "Export CSV",
+    "exp.exportExcel": "Export Excel",
+    "exp.importExcel": "Import Excel",
+    "exp.importing": "Importing…",
+    "exp.importSuccess": "Imported {count} expense(s). {skipped} skipped.",
+    "exp.importFailed": "Import failed",
+    "exp.importNoFile": "Please select a file.",
+    "exp.downloadTemplate": "Download template",
 
     /* insights */
     "ins.predictedSpend": "Predicted spend",
@@ -421,6 +428,13 @@ export const translations: Record<Locale, Dict> = {
     "exp.budgetByCategory": "Ngân sách theo danh mục",
     "exp.noCategoryBudgets": "Chưa đặt ngân sách theo danh mục.",
     "exp.exportCsv": "Xuất CSV",
+    "exp.exportExcel": "Xuất Excel",
+    "exp.importExcel": "Nhập từ Excel",
+    "exp.importing": "Đang nhập…",
+    "exp.importSuccess": "Đã nhập {count} khoản. {skipped} bị bỏ qua.",
+    "exp.importFailed": "Nhập thất bại",
+    "exp.importNoFile": "Vui lòng chọn một tệp.",
+    "exp.downloadTemplate": "Tải mẫu",
 
     /* insights */
     "ins.predictedSpend": "Dự báo chi tiêu",

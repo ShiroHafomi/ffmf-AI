@@ -201,7 +201,8 @@ def _client(db):
     return TestClient(main.app)
 
 
-H = lambda uid: {"X-User-Id": str(uid)}
+def H(uid):
+    return {"X-User-Id": str(uid)}
 
 
 # ───────────────────────── Create ─────────────────────────

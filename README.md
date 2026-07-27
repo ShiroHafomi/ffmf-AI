@@ -1,4 +1,4 @@
-# ₣ FFMS AI Microservice
+#  FFMS AI Microservice
 
 > Household expense **forecasting** & **financial insights** for the FFMS (Family Financial Management System).
 
@@ -12,27 +12,27 @@ backend (which owns auth/UI) and is never exposed directly to browsers.
 
 ---
 
-## ✨ Features
+##  Features
 
-- 🔮 **Deterministic forecasting** — Linear Regression for short series (2–5 pts),
+-  **Deterministic forecasting** — Linear Regression for short series (2–5 pts),
   Holt exponential smoothing for longer ones (≥6 pts), with an additive **seasonal
   adjustment** when ≥12 months exist. Free, offline, reproducible — this is the
   *primary* predictor.
-- 📚 **RAG-enriched suggestions** — an offline TF-IDF retriever (no API key) grounds
+-  **RAG-enriched suggestions** — an offline TF-IDF retriever (no API key) grounds
   the returned tips in relevant financial knowledge.
-- 🤖 **Optional LLM** — strictly opt-in via `LLM_PROVIDER` (Claude or any
+-  **Optional LLM** — strictly opt-in via `LLM_PROVIDER` (Claude or any
   OpenAI-compatible endpoint such as Groq/Together/Ollama). Any missing config or
   call failure **falls back** to the deterministic model — no paid calls by surprise.
-- 📊 **Insights** — category breakdown, anomaly detection, savings projection,
+-  **Insights** — category breakdown, anomaly detection, savings projection,
   cutback levers, per-lever alert thresholds, per-category forecasts, and a
   walk-forward **forecast-quality** backtest.
-- 🔐 **Secure by design** — `X-API-Key` auth, per-IP rate limiting, explicit-origin
+-  **Secure by design** — `X-API-Key` auth, per-IP rate limiting, explicit-origin
   CORS, and input validation that never echoes raw values.
-- 🖥️ **Interactive dashboard** — a zero-build web UI at `/dashboard`.
+-  **Interactive dashboard** — a zero-build web UI at `/dashboard`.
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
                          ┌──────────────────────────────┐
@@ -64,7 +64,7 @@ backend (which owns auth/UI) and is never exposed directly to browsers.
 
 ---
 
-## 🚀 Quick start
+##  Quick start
 
 ```bash
 # 1. (optional) create a virtualenv
@@ -117,7 +117,7 @@ Copy `.env.example` → `.env`. `.env` is gitignored.
 
 ---
 
-## 📡 API reference
+##  API reference
 
 All routes (except `/`) require `X-API-Key` when `AI_SERVICE_API_KEY` is set, and are
 rate-limited per IP.
@@ -141,7 +141,7 @@ rate-limited per IP.
 
 ---
 
-## 📈 Forecasting model
+##  Forecasting model
 
 The **primary** predictor is deterministic and always runs (no network, no cost):
 
@@ -165,7 +165,7 @@ The **primary** predictor is deterministic and always runs (no network, no cost)
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ```bash
 pip install -r requirements.txt   # includes pytest, pytest-cov via dev extras if any
@@ -178,7 +178,7 @@ DB service error handling is covered for `ConnectionError`.
 
 ---
 
-## 🔒 Security
+##  Security
 
 - **API-key auth** — `api_key_middleware` requires `X-API-Key` (constant-time compare)
   on every request except `/`. Disabled when `AI_SERVICE_API_KEY` is empty (local/dev).
@@ -191,7 +191,7 @@ DB service error handling is covered for `ConnectionError`.
 
 ---
 
-## 🗂️ Project layout
+##  Project layout
 
 ```
 /backend AI/
@@ -220,6 +220,6 @@ DB service error handling is covered for `ConnectionError`.
 
 ---
 
-## 📝 License
+##  License
 
 Part of the FFMS (Family Financial Management System) family of applications.
