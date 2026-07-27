@@ -2,10 +2,11 @@
 
 Pipeline:
   1. RETRIEVE (data): monthly expense/income history + category breakdown (DB).
-  2. FORECAST (primary): a deterministic statistical model — Linear Regression
-     for short series (2-5 pts), Holt exponential smoothing for longer ones
-     (>=6 pts), with a seasonal additive adjustment when >=12 months exist.
-     Free, reproducible, no network.
+  2. FORECAST (primary): ensemble of deterministic statistical models —
+     Linear Regression (short series, <6 pts), Holt exponential smoothing
+     (>=6 pts), Holt-Winters triple smoothing (seasonal, >=24 pts), weighted
+     by in-sample time-weighted fit. Seasonal additive adjustment when >=12
+     pts. Free, reproducible, no network.
   3. RETRIEVE (knowledge): the most relevant financial-advice snippets for the
      household's situation, via an offline TF-IDF retriever (see
      services/rag_retriever.py). These enrich the returned *suggestions* only.
@@ -15,7 +16,8 @@ Pipeline:
      falls back to step 2 — Claude is NEVER called unless the user opts in.
 
 Analysis helpers (analyze / analyze_categories / detect_anomalies / ...) are
-unchanged.
+unchanged. New helpers: trend_analysis, residual_based_interval, ensemble_forecast,
+holt_winters_forecast.
 """
 
 import logging
@@ -389,6 +391,391 @@ def _deterministic_confidence(totals: list[float]) -> str:
     return "high" if (n >= 12 and cv < 0.25) else "medium"
 
 
+# ───────────────────────── Holt-Winters (Triple Exponential Smoothing) ─────────
+def _holt_winters_core(
+    totals: list[float],
+    h: int = 1,
+    alpha: float = 0.3,
+    beta: float = 0.1,
+    gamma: float = 0.2,
+    seasonal_period: int = 12,
+    multiplicative: bool = False,
+) -> dict:
+    """Holt-Winters triple exponential smoothing with additive seasonality.
+
+    Works when len(totals) >= 2*seasonal_period (2 full cycles). Falls
+    back gracefully: if there is not enough data for the seasonal component,
+    the seasonal index is treated as zero (effectively Holt smoothing).
+    """
+    n = len(totals)
+    if n < 2:
+        base = float(totals[-1]) if totals else 0.0
+        return {"pred": base, "fitted": [], "level": base, "trend": 0.0, "seasonal": []}
+
+    sp = min(seasonal_period, n // 2) if n >= 4 else 0
+
+    # Initialize level, trend and seasonal indices.
+    if sp >= 2:
+        # Initial seasonal indices from the first full cycle.
+        first_cycle = totals[:sp]
+        cycle_avg = sum(first_cycle) / sp
+        initial_seasonal = [v / cycle_avg for v in first_cycle] if cycle_avg != 0 else [1.0] * sp
+        # Initial level = average of first cycle / seasonal.
+        initial_level = sum(
+            v / s for v, s in zip(first_cycle, initial_seasonal)
+        ) / sp
+        # Initial trend = average of between-cycle differences.
+        if n >= 2 * sp:
+            second_cycle = totals[sp : 2 * sp]
+            second_avg = sum(second_cycle) / sp
+            initial_trend = (second_avg - cycle_avg) / sp
+        else:
+            initial_trend = 0.0
+        seasonal = list(initial_seasonal)
+    else:
+        initial_level = float(totals[0])
+        initial_trend = float(totals[1] - totals[0]) if n >= 2 else 0.0
+        seasonal = []
+        sp = 0
+
+    level = initial_level
+    trend = initial_trend
+    fitted: list[float] = []
+
+    # Run the smoothing pass over the data.
+    for i, y in enumerate(totals):
+        if i == 0:
+            last_level = level
+            if sp > 0:
+                s_idx = i % sp
+                sm = seasonal[s_idx]
+                level = alpha * (y / sm if multiplicative else y - sm) + (1 - alpha) * (last_level + trend)
+            else:
+                level = alpha * y + (1 - alpha) * (last_level + trend)
+            trend = beta * (level - last_level) + (1 - beta) * trend
+            if sp > 0:
+                s_idx = i % sp
+                if multiplicative:
+                    seasonal[s_idx] = gamma * (y / level) + (1 - gamma) * seasonal[s_idx]
+                else:
+                    seasonal[s_idx] = gamma * (y - level) + (1 - gamma) * seasonal[s_idx]
+            fitted.append(level + trend + (seasonal[i % sp] if sp else 0))
+            continue
+
+        last_level = level
+        if sp > 0:
+            s_idx = i % sp
+            sm = seasonal[s_idx]
+            level = alpha * (y / sm if multiplicative else y - sm) + (1 - alpha) * (last_level + trend)
+        else:
+            level = alpha * y + (1 - alpha) * (last_level + trend)
+        trend = beta * (level - last_level) + (1 - beta) * trend
+        if sp > 0:
+            s_idx = i % sp
+            if multiplicative:
+                seasonal[s_idx] = gamma * (y / level) + (1 - gamma) * seasonal[s_idx]
+            else:
+                seasonal[s_idx] = gamma * (y - level) + (1 - gamma) * seasonal[s_idx]
+        fitted.append(level + trend + (seasonal[i % sp] if sp else 0))
+
+    # h-step forecast.
+    if sp > 0:
+        seasonal_term = [seasonal[(n + j) % sp] for j in range(h)]
+        forecast = level + h * trend + sum(seasonal_term) if multiplicative else level + h * trend + sum(seasonal_term)
+    else:
+        forecast = level + h * trend
+
+    return {"pred": forecast, "fitted": fitted, "level": level, "trend": trend, "seasonal": seasonal}
+
+
+def holt_winters_forecast(
+    totals: list[float],
+    h: int = 1,
+    alpha: float = 0.3,
+    beta: float = 0.1,
+    gamma: float = 0.2,
+    seasonal_period: int = 12,
+) -> float:
+    """Holt-Winters additive seasonal forecast. Returns the h-step-ahead
+    prediction. Falls back to Holt when there are fewer than
+    2*seasonal_period points."""
+    result = _holt_winters_core(
+        totals, h=h, alpha=alpha, beta=beta, gamma=gamma,
+        seasonal_period=seasonal_period,
+    )
+    return round(float(result["pred"]), 2)
+
+
+# ───────────────────────── Ensemble forecasting ─────────────────────────
+def _model_wisdom_score(data: list[dict], amount_key: str, model_name: str) -> float:
+    """In-sample wisdom score for a single model on the given data.
+
+    Higher = better fit (lower weighted error). Uses time-weighted
+    MSE so recent errors count more — a model that tracks the latest
+    months well is preferred over one that looks good historically but
+    drifts for recent data.
+
+    Returns a large positive number for perfect fits; the caller picks
+    the model with the highest score (= lowest error).
+    """
+    totals = [float(r.get(amount_key, 0)) for r in data]
+    n = len(totals)
+    if n < 2:
+        return -1e9
+
+    if model_name == "linear_regression":
+        X = np.arange(n).reshape(-1, 1)
+        y = np.asarray(totals, dtype=float)
+        model = LinearRegression()
+        model.fit(X, y)
+        preds = model.predict(X)
+    elif model_name == "holt":
+        preds = _holt_core(totals, h=1)["fitted"]
+        # Holt fitted values start at index 1; pad with the first value.
+        preds = [totals[0]] + preds[: n - 1]
+    elif model_name == "holt_winters":
+        result = _holt_winters_core(totals, h=1)
+        preds = result["fitted"]
+        if len(preds) < n:
+            preds = preds + [totals[-1]] * (n - len(preds))
+        preds = preds[:n]
+    else:
+        return -1e9
+
+    # Time-weighted MSE (recent months weighted more).
+    weights = np.linspace(1.0, 2.0, n)
+    errors = np.asarray(preds[:n]) - np.asarray(totals)
+    weighted_mse = float(np.average(errors**2, weights=weights))
+    # Guard against division by zero and numerical edge cases.
+    mean_val = float(np.mean(totals)) if totals else 1.0
+    return 1.0 / (1.0 + weighted_mse / (mean_val**2 + 1e-9))
+
+
+def ensemble_forecast(
+    data: list[dict],
+    amount_key: str = "total_expense",
+) -> tuple[float, str, dict[str, float]]:
+    """Multi-model ensemble forecast.
+
+    Trains Linear Regression, Holt, and Holt-Winters on the series.
+    Each model gets a wisdom score based on in-sample time-weighted fit.
+    The final prediction is a weighted average of each model's forecast,
+    where the weights are proportional to their wisdom scores.
+    Returns (prediction, method_label, per_model_scores).
+    """
+    totals = [float(r.get(amount_key, 0)) for r in data]
+    n = len(totals)
+
+    # With very little data, fall back to the simplest model.
+    if n < 2:
+        base = float(totals[-1]) if totals else 0.0
+        return round(base, 2), "ensemble_fallback_none", {}
+
+    # Collect candidate predictions with their names and scores.
+    candidates: list[tuple[str, float, float]] = []
+
+    # 1) Linear Regression — always available with >= 2 points.
+    try:
+        lr_pred = linear_regression_predict(data, amount_key)
+        lr_score = _model_wisdom_score(data, amount_key, "linear_regression")
+        candidates.append(("linear_regression", lr_pred, lr_score))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) Holt — available with >= 2 points.
+    try:
+        holt_pred = holt_forecast(totals)
+        holt_score = _model_wisdom_score(data, amount_key, "holt")
+        candidates.append(("holt", holt_pred, holt_score))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3) Holt-Winters — needs at least 2 full seasonal cycles (24 points
+    #    for 12-month seasonality); falls back gracefully otherwise.
+    try:
+        hw_pred = holt_winters_forecast(totals)
+        hw_score = _model_wisdom_score(data, amount_key, "holt_winters")
+        candidates.append(("holt_winters", hw_pred, hw_score))
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not candidates:
+        base = float(np.mean(totals)) if totals else 0.0
+        return round(base, 2), "ensemble_fallback_none", {}
+
+    # Weight by wisdom score (softmax-like normalisation).
+    scores = np.array([c[2] for c in candidates], dtype=float)
+    # Shift so the best model has score 1.0 and others are <= 1.0.
+    max_score = scores.max()
+    if max_score <= 0:
+        weights = np.ones(len(scores)) / len(scores)
+    else:
+        shifted = scores - scores.min() + 1e-9
+        weights = shifted / shifted.sum()
+
+    # Weighted average prediction.
+    preds = np.array([c[1] for c in candidates], dtype=float)
+    ensemble_pred = float(np.average(preds, weights=weights))
+
+    # Label reflects what happened in the ensemble.
+    best_name = candidates[int(np.argmax(scores))][0]
+    if len(candidates) > 1:
+        label = "ensemble"
+    else:
+        label = f"ensemble_{best_name}"
+
+    per_model = {name: round(float(sc), 4) for name, _, sc in candidates}
+
+    return round(ensemble_pred, 2), label, per_model
+
+
+# ───────────────────────── Trend-strength detection ─────────────────────────
+def trend_analysis(
+    data: list[dict],
+    amount_key: str = "total_expense",
+) -> dict:
+    """Detect trend direction, strength, and acceleration/deceleration.
+
+    Returns a dict with:
+      - direction: 'increasing' | 'decreasing' | 'flat'
+      - strength: 'strong' | 'moderate' | 'weak' (based on R² of the trend)
+      - acceleration: 'accelerating' | 'decelerating' | 'steady'
+      - slope_pct: slope as percentage of the starting value (positive = up)
+      - recent_slope_pct: slope over the last 3 months vs. the full period slope
+      - confidence: 'high' | 'medium' | 'low' based on data length and R²
+    """
+    totals = [float(r.get(amount_key, 0)) for r in data]
+    n = len(totals)
+
+    if n < 2:
+        return {
+            "direction": "flat",
+            "strength": "weak",
+            "acceleration": "steady",
+            "slope_pct": 0.0,
+            "recent_slope_pct": 0.0,
+            "confidence": "low",
+        }
+
+    amounts = np.asarray(totals, dtype=float)
+    x = np.arange(n).reshape(-1, 1)
+
+    # Full-period linear regression for trend direction/strength.
+    lr = LinearRegression()
+    lr.fit(x, amounts)
+    r2 = float(lr.score(x, amounts))
+    slope = float(lr.coef_[0])
+    intercept = float(lr.intercept_)
+
+    # Slope as percentage of the mean (normalised direction strength).
+    mean_val = float(np.mean(amounts))
+    slope_pct = (slope / (mean_val or 1.0)) * 100
+
+    # Direction and strength labels.
+    if slope > 0:
+        direction = "increasing"
+    elif slope < 0:
+        direction = "decreasing"
+    else:
+        direction = "flat"
+
+    # R² thresholds for strength: >=0.7 strong, >=0.4 moderate, else weak.
+    if r2 >= 0.7:
+        strength = "strong"
+    elif r2 >= 0.4:
+        strength = "moderate"
+    else:
+        strength = "weak"
+
+    # Acceleration: compare the last 3-month slope to the full-period slope.
+    if n >= 4:
+        recent = amounts[-3:]
+        x_recent = np.arange(3).reshape(-1, 1)
+        lr_recent = LinearRegression()
+        lr_recent.fit(x_recent, recent)
+        recent_slope = float(lr_recent.coef_[0])
+        full_slope_per_3 = slope * 3  # what the full model predicts for 3 months
+        if abs(full_slope_per_3) > 1e-9:
+            acc_ratio = recent_slope / (abs(full_slope_per_3) / 3)
+            if acc_ratio > 1.3:
+                acceleration = "accelerating"
+            elif acc_ratio < 0.7:
+                acceleration = "decelerating"
+            else:
+                acceleration = "steady"
+        else:
+            acceleration = "steady"
+        recent_slope_pct = (recent_slope / (mean_val or 1.0)) * 100
+    else:
+        acceleration = "steady"
+        recent_slope_pct = slope_pct
+
+    # Confidence based on n and R²: high = many points + strong trend, low = few/noisy.
+    if n >= 12 and r2 >= 0.4:
+        confidence = "high"
+    elif n >= 6 and r2 >= 0.2:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "direction": direction,
+        "strength": strength,
+        "acceleration": acceleration,
+        "slope_pct": round(slope_pct, 2),
+        "recent_slope_pct": round(recent_slope_pct, 2),
+        "confidence": confidence,
+        "r2": round(r2, 3),
+    }
+
+
+# ───────────────────────── Residual-based prediction interval ─────────────────
+def residual_based_interval(
+    data: list[dict],
+    predicted: float,
+    confidence: str = "medium",
+    amount_key: str = "total_expense",
+) -> list[float]:
+    """Prediction interval based on the residuals of the best-fit linear trend.
+
+    Uses the standard deviation of the residuals from the trend line,
+    scaled by a z-value for the requested confidence level. A scaled
+    floor prevents zero-width bands for perfectly consistent series.
+    Returns [lo, hi].
+    """
+    predicted = float(predicted)
+    totals = [float(r.get(amount_key, 0)) for r in data]
+    n = len(totals)
+
+    if n < 2:
+        return [round(max(0.0, predicted), 2), round(predicted, 2)]
+
+    # Fit a linear trend and compute residuals.
+    x = np.arange(n).reshape(-1, 1)
+    y = np.asarray(totals, dtype=float)
+    lr = LinearRegression()
+    lr.fit(x, y)
+    residuals = y - lr.predict(x)
+    sd = float(np.std(residuals))
+
+    # Wider band when we are less confident (few/volatile observations).
+    z = _z_for_confidence(confidence)
+    if n < 6:
+        z *= 1.4
+
+    half = z * sd
+
+    # Scaled minimum band (2% of the mean) so a smooth series
+    # does not report a misleading zero-width interval.
+    mean_val = float(np.mean(totals))
+    floor_half = 0.02 * abs(mean_val) if mean_val else 0.0
+    half = max(half, floor_half)
+
+    lo = max(0.0, predicted - half)
+    hi = predicted + half
+    return [round(lo, 2), round(hi, 2)]
+
+
 _METHOD_LABELS = {
     "fallback_linear_regression": "linear regression",
     "fallback_holt": "Holt exponential smoothing",
@@ -415,21 +802,37 @@ def _rag_fallback(
 ) -> dict:
     """Deterministic forecast — the PRIMARY predictor, not just an error path.
 
-    Returns {predicted, explanation, suggestions, confidence, method}. The
-    forecast number always comes from ``deterministic_forecast`` (free,
-    reproducible, no network). When retrieval succeeded, its snippets become
-    the suggestions. Any failure is contained: we still return a valid dict
-    (predicted=0) so the service never crashes.
+    Uses ensemble forecasting (Linear Regression + Holt + Holt-Winters)
+    weighted by in-sample fit for the best point estimate. When retrieval
+    succeeded, its snippets become the suggestions. Any failure is
+    contained: we still return a valid dict (predicted=0) so the service
+    never crashes.
     """
+    # Try the ensemble forecaster first; fall back to deterministic on error.
+    ensemble_method: str = ""
+    per_model: dict = {}
     try:
-        pred, method = deterministic_forecast(data, amount_key)
+        pred, ensemble_method, per_model = ensemble_forecast(data, amount_key)
+        method = ensemble_method if ensemble_method != "ensemble_fallback_none" else "fallback_none"
     except Exception as e:  # noqa: BLE001
-        logger.error("Deterministic forecast failed; returning safe zero. %s", type(e).__name__)
-        pred, method = 0.0, "fallback_error"
+        logger.error("Ensemble forecast failed; trying deterministic. %s", type(e).__name__)
+        try:
+            pred, method = deterministic_forecast(data, amount_key)
+        except Exception:  # noqa: BLE001
+            logger.error("Deterministic forecast also failed; returning safe zero.")
+            pred, method = 0.0, "fallback_error"
 
     totals = [float(r.get(amount_key, 0)) for r in data]
     confidence = "low" if method == "fallback_error" else _deterministic_confidence(totals)
-    interval = _prediction_interval(totals, pred, confidence)
+    # Use residual-based intervals for better uncertainty quantification.
+    interval = residual_based_interval(data, pred, confidence, amount_key)
+
+    # Append per-model scores to explanation when ensemble was used.
+    model_details = ""
+    if ensemble_method == "ensemble" and per_model:
+        model_details = " | Models:" + ", ".join(
+            f"{k}={v}" for k, v in sorted(per_model.items(), key=lambda x: -x[1])
+        )
 
     # Even without an LLM, retrieved knowledge enriches the suggestions (RAG
     # works in the free/offline path too). Take up to 3 first sentences.
@@ -440,6 +843,8 @@ def _rag_fallback(
     )
 
     explanation = _deterministic_explanation(method, totals)
+    if model_details:
+        explanation += model_details
     if reason:
         explanation = f"{explanation} ({reason})"
 
@@ -952,7 +1357,8 @@ def forecast_category_breakdown(
 
     ``category_monthly`` : kết quả của ``db_service.get_monthly_category_expenses``
     — mỗi phần tử {category_name, yr, month, total}. Gom theo danh mục, sắp xếp
-    theo thời gian, rồi dùng ``deterministic_forecast``.
+    theo thời gian, rồi dùng ``ensemble_forecast`` (fallback to deterministic).
+    Returns per-category predictions with intervals, trend analysis, and model used.
     """
     from collections import defaultdict
 
@@ -966,15 +1372,27 @@ def forecast_category_breakdown(
     out: list[dict] = []
     for name, series in by_cat.items():
         series.sort(key=lambda x: (x["yr"], x["month"]))
+        cat_totals = [s["total"] for s in series]
+
         if len(series) < 2:
             predicted = round(series[0]["total"], 2) if series else 0.0
             method = "fallback_none" if not series else "single_point"
+            conf = "low"
+            interval = [predicted, predicted]
         else:
-            predicted, method = deterministic_forecast(series, amount_key)
+            # Use ensemble forecast for better accuracy on each category.
+            try:
+                predicted, method, per_model = ensemble_forecast(series, amount_key)
+                conf = _deterministic_confidence(cat_totals)
+                # Residual-based intervals for the category series.
+                interval = residual_based_interval(series, predicted, conf, amount_key)
+            except Exception:  # noqa: BLE001
+                predicted, method = deterministic_forecast(series, amount_key)
+                conf = _deterministic_confidence(cat_totals)
+                interval = _prediction_interval(cat_totals, predicted, conf)
 
-        cat_totals = [s["total"] for s in series]
-        conf = _deterministic_confidence(cat_totals) if len(cat_totals) >= 2 else "low"
-        interval = _prediction_interval(cat_totals, predicted, conf)
+        # Trend analysis for this category's history.
+        trend = trend_analysis(series, amount_key)
 
         out.append(
             {
@@ -984,6 +1402,8 @@ def forecast_category_breakdown(
                 "last": round(series[-1]["total"], 2),
                 "months": len(series),
                 "method": method,
+                "confidence": conf,
+                "trend": trend,
             }
         )
 
@@ -994,54 +1414,77 @@ def forecast_category_breakdown(
 def backtest_forecast(
     data: list[dict], amount_key: str = "total_expense", min_train: int = 3
 ) -> dict | None:
-    """Walk-forward 1-step backtest of the deterministic forecaster.
+    """Walk-forward 1-step backtest comparing deterministic vs. ensemble forecasters.
 
     For every month from ``min_train`` onward, fit on all earlier months and
-    predict the next, then compare the prediction against the actual. Reports
-    MAE / RMSE / MAPE and a skill score versus a naive last-value baseline so
-    callers can judge how much the model actually helps (skill > 0 means the
-    model beats "just use last month"). Returns None when history is too short
-    to backtest. Pure function — no DB, no network.
-
-    Use it to (a) quantify forecast quality per household, and (b) decide which
-    households are safe to trust the point estimate vs. should lean on the
-    prediction interval instead.
+    predict the next, then compare both forecasters against the actual.
+    Reports MAE / RMSE / MAPE and a skill score versus a naive
+    last-value baseline so callers can judge how much the model actually
+    helps (skill > 0 means the model beats "just use last month").
+    Returns None when history is too short to backtest. Pure function —
+    no DB, no network.
     """
     totals = [float(r.get(amount_key, 0)) for r in data]
-    if len(totals) < min_train + 1:
+    n_total = len(totals)
+    if n_total < min_train + 1:
         return None
 
-    preds: list[float] = []
+    det_preds: list[float] = []
+    ens_preds: list[float] = []
     acts: list[float] = []
-    for i in range(min_train, len(totals)):
-        p, _ = deterministic_forecast(
-            [{"yr": 0, "month": j, amount_key: v} for j, v in enumerate(totals[:i])],
-            amount_key,
-        )
-        preds.append(p)
+    for i in range(min_train, n_total):
+        window = [{"yr": 0, "month": j, amount_key: v} for j, v in enumerate(totals[:i])]
+
+        # Deterministic forecaster (original method).
+        p_det, _ = deterministic_forecast(window, amount_key)
+        det_preds.append(p_det)
+
+        # Ensemble forecaster (multi-model weighted average).
+        try:
+            p_ens, _, _ = ensemble_forecast(window, amount_key)
+        except Exception:  # noqa: BLE001 — never let backtest crash
+            p_ens = p_det
+        ens_preds.append(p_ens)
+
         acts.append(totals[i])
 
-    naive = totals[min_train - 1: -1]  # last value seen before each test month
-    errs = [a - p for a, p in zip(acts, preds)]
-    nerrs = [a - n for a, n in zip(acts, naive)]
+    naive = totals[min_train - 1 : -1]  # last value seen before each test month
 
-    mae = float(np.mean([abs(e) for e in errs])) if errs else 0.0
-    rmse = float(np.sqrt(np.mean([e * e for e in errs]))) if errs else 0.0
-    mape = (
-        float(np.mean([abs(e / a) * 100 for e, a in zip(errs, acts) if a]))
-        if acts else 0.0
-    )
-    nmae = float(np.mean([abs(e) for e in nerrs])) if nerrs else 0.0
-    skill = round(1 - mae / nmae, 3) if nmae else None
+    def _metrics(preds: list[float], label: str) -> dict:
+        errs = [a - p for a, p in zip(acts, preds)]
+        nerrs = [a - n for a, n in zip(acts, naive)]
+        mae = float(np.mean([abs(e) for e in errs])) if errs else 0.0
+        rmse = float(np.sqrt(np.mean([e * e for e in errs]))) if errs else 0.0
+        mape = (
+            float(np.mean([abs(e / a) * 100 for e, a in zip(errs, acts) if a]))
+            if acts else 0.0
+        )
+        nmae = float(np.mean([abs(e) for e in nerrs])) if nerrs else 0.0
+        skill = round(1 - mae / nmae, 3) if nmae else None
+        return {
+            "method": label,
+            "folds": len(acts),
+            "mae": round(mae, 2),
+            "rmse": round(rmse, 2),
+            "mape_percent": round(mape, 2),
+            "naive_mae": round(nmae, 2),
+            "skill_vs_naive": skill,
+        }
+
+    det_metrics = _metrics(det_preds, "deterministic_walk_forward")
+    ens_metrics = _metrics(ens_preds, "ensemble_walk_forward")
+
+    # Pick the winner for the overall verdict.
+    winner = "ensemble" if ens_metrics["skill_vs_naive"] and (
+        not det_metrics["skill_vs_naive"]
+        or ens_metrics["mae"] < det_metrics["mae"]
+    ) else "deterministic"
 
     return {
-        "method": "deterministic_walk_forward",
+        "winner": winner,
+        "deterministic": det_metrics,
+        "ensemble": ens_metrics,
         "folds": len(acts),
-        "mae": round(mae, 2),
-        "rmse": round(rmse, 2),
-        "mape_percent": round(mape, 2),
-        "naive_mae": round(nmae, 2),
-        "skill_vs_naive": skill,  # >0 => model beats last-value baseline
     }
 
 

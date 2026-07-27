@@ -218,6 +218,140 @@ class InsightsResponse(BaseModel):
     recommended_actions: list[RecommendedAction] = []
 
 
+# ───────────────────────── /forecast response ─────────────────────────
+class SingleMonthForecast(BaseModel):
+    """One month's forecast prediction."""
+
+    month_offset: int = Field(examples=[1])
+    predicted: float = Field(examples=[9800000.0])
+    interval: Optional[list[float]] = Field(
+        default=None, examples=[[9100000.0, 10500000.0]]
+    )
+    increase_percent: float = Field(examples=[6.52])
+    status: str = Field(examples=["normal"])
+    message: str
+    suggestion: str
+    method: Optional[str] = Field(default=None)
+    confidence: Optional[str] = Field(default=None)
+    explanation: Optional[str] = None
+    suggestions: list[str] = []
+
+
+class ForecastResponse(BaseModel):
+    """Full payload returned by ``GET /forecast/{household_id}``."""
+
+    household_id: int = Field(examples=[1])
+    months_forecast: int = Field(examples=[3])
+    forecasts: list[SingleMonthForecast] = []
+    forecast_quality: Optional[ForecastQuality] = None
+    predicted_income: Optional[float] = Field(default=None)
+
+
+# ───────────────────────── /anomaly response ─────────────────────────
+class AnomalyResponse(BaseModel):
+    """Full payload returned by ``GET /anomaly/{household_id}``."""
+
+    household_id: int = Field(examples=[1])
+    rel_threshold: float = Field(examples=[1.8])
+    anomalies: list[Anomaly] = []
+    trend: dict = Field(examples=[{"direction": "increasing", "strength": "moderate", "acceleration": "steady", "slope_pct": 5.0, "recent_slope_pct": 4.5, "confidence": "medium", "r2": 0.85}])
+    forecast_quality: Optional[ForecastQuality] = None
+    total_months: int = Field(examples=[12])
+    anomaly_count: int = Field(examples=[2])
+
+
+# ───────────────────────── /savings-plan response ─────────────────────────
+class MonthProjection(BaseModel):
+    """One month's projected expense, income, and savings."""
+
+    month_offset: int = Field(examples=[1])
+    predicted_expense: Optional[float] = Field(default=None)
+    predicted_income: Optional[float] = Field(default=None)
+    surplus: Optional[float] = Field(default=None)
+    status: str = Field(examples=["surplus"])
+    cumulative_savings: Optional[float] = Field(default=None)
+
+
+class SavingsPlanResponse(BaseModel):
+    """Full payload returned by ``GET /savings-plan/{household_id}``."""
+
+    household_id: int = Field(examples=[1])
+    projection_months: int = Field(examples=[6])
+    expense_projections: list[MonthProjection] = []
+    income_projections: list[MonthProjection] = []
+    savings_projections: list[MonthProjection] = []
+    budget: Optional[float] = Field(default=None)
+    savings_advice: Savings = Field(default_factory=Savings)
+
+
+# ───────────────────────── /budget-optimizer response ─────────────────────────
+class BudgetOptimization(BaseModel):
+    """One category's suggested budget allocation."""
+
+    category: str = Field(examples=["Groceries"])
+    current_spent: float = Field(examples=[4200000.0])
+    current_budget: Optional[float] = Field(default=None, examples=[3500000.0])
+    suggested_budget: float = Field(examples=[3800000.0])
+    budget_change_pct: Optional[float] = Field(default=None, examples=[8.6])
+    rationale: str
+    priority: str = Field(examples=["high"])
+
+
+class BudgetOptimizerResponse(BaseModel):
+    """Full payload returned by ``GET /budget-optimizer/{household_id}``."""
+
+    household_id: int = Field(examples=[1])
+    total_current_monthly_spend: float = Field(examples=[12000000.0])
+    total_suggested_budget: float = Field(examples=[11800000.0])
+    total_current_budget: float = Field(examples=[12000000.0])
+    optimization: list[BudgetOptimization] = []
+    cutback_opportunities: CutbackSuggestions = Field(default_factory=CutbackSuggestions)
+    alerts: AlertThresholds = Field(default_factory=AlertThresholds)
+
+
+class ForecastPoint(BaseModel):
+    """A single forecast data point."""
+
+    predicted: Optional[float] = Field(default=None)
+    interval: Optional[list[float]] = Field(default=None)
+    method: Optional[str] = Field(default=None)
+    confidence: Optional[str] = Field(default=None)
+
+
+# ───────────────────────── /category-insights response ─────────────────────────
+class CategoryInsight(BaseModel):
+    """Per-category deep insight with trend, forecast, and suggestion."""
+
+    category: str = Field(examples=["Groceries"])
+    current_spent: Optional[float] = Field(default=None)
+    transaction_count: int = Field(examples=[15])
+    trend: dict = Field(default_factory=dict)
+    forecast_next_month: ForecastPoint = Field(default_factory=lambda: ForecastPoint(predicted=0.0))
+    last_month: Optional[float] = Field(default=None)
+    budget: Optional[float] = Field(default=None)
+    budget_usage: Optional[float] = Field(default=None)
+    over_amount: float = Field(default=0.0)
+    suggestion: Optional[str] = None
+
+
+class CategorySummary(BaseModel):
+    """Summary counts across all categories."""
+
+    total_categories: int = Field(examples=[5])
+    total_forecast: float = Field(examples=[12000000.0])
+    categories_over_budget: int = Field(examples=[2])
+    categories_near_limit: int = Field(examples=[1])
+    categories_under_budget: int = Field(examples=[2])
+
+
+class CategoryInsightsResponse(BaseModel):
+    """Full payload returned by ``GET /category-insights/{household_id}``."""
+
+    household_id: int = Field(examples=[1])
+    categories: list[CategoryInsight] = []
+    summary: CategorySummary = Field(default_factory=CategorySummary)
+
+
 # ───────────────────────── Generic error envelope ─────────────────────────
 class ErrorResponse(BaseModel):
     """Standard FastAPI error envelope (``{"detail": "..."}``)."""

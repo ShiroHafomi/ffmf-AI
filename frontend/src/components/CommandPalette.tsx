@@ -112,6 +112,21 @@ export default function CommandPalette() {
     return items.filter((i) => i.label.toLowerCase().includes(q));
   }, [items, query]);
 
+  function highlight(text: string, query: string) {
+    if (!query.trim()) return text;
+    const idx = text.toLowerCase().indexOf(query.trim());
+    if (idx === -1) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="bg-brand-200 text-brand-900 dark:bg-brand-900/40 dark:text-brand-200 rounded px-0.5">
+          {text.slice(idx, idx + query.trim().length)}
+        </mark>
+        {text.slice(idx + query.trim().length)}
+      </>
+    );
+  }
+
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       setActive((a) => Math.min(a, Math.max(0, filtered.length - 1)));
@@ -149,7 +164,7 @@ export default function CommandPalette() {
         aria-label={t("cmd.title")}
       >
         <div className="flex items-center gap-3 border-b border-ink-100 dark:border-ink-800 px-4">
-          <span className="text-ink-400">
+          <span className="text-ink-500 dark:text-ink-400">
             <Icon name="search" className="h-5 w-5" />
           </span>
           <input
@@ -158,9 +173,9 @@ export default function CommandPalette() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder={t("cmd.placeholder")}
-            className="w-full bg-transparent py-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 dark:text-ink-50"
+            className="w-full bg-transparent py-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 dark:placeholder:text-ink-400 dark:text-ink-900"
           />
-          <kbd className="hidden rounded-md border border-ink-200 px-1.5 py-0.5 text-[10px] font-medium text-ink-400 sm:block dark:border-ink-700">
+          <kbd className="hidden rounded-md border border-ink-200 px-1.5 py-0.5 text-[10px] font-medium text-ink-500 sm:block dark:border-ink-700 dark:text-ink-400">
             ESC
           </kbd>
         </div>
@@ -183,7 +198,7 @@ export default function CommandPalette() {
                 <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-400">
                   <Icon name={item.icon} className="h-4 w-4" />
                 </span>
-                <span className="flex-1 font-medium">{item.label}</span>
+                <span className="flex-1 font-medium">{highlight(item.label, query)}</span>
                 {i === active && (
                   <span className="text-[10px] font-medium uppercase tracking-wide text-ink-400">
                     ↵

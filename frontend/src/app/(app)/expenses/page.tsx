@@ -255,14 +255,14 @@ export default function ExpensesPage() {
             />
             <div className="mb-3">
               <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 dark:text-ink-300">
                   <Icon name="search" className="h-4 w-4" />
                 </span>
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t("common.searchPlaceholder")}
-                  className="input pl-9"
+                  className="input pl-9 placeholder:text-ink-400 dark:placeholder:text-ink-500"
                 />
               </div>
             </div>

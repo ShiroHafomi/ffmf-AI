@@ -60,6 +60,15 @@
   --on-brand: #ffffff;
   --brand-soft: #ecfdf5;
   --brand-ink: #047857;
+  --success-soft: #ecfdf5;
+  --success-ink: #047857;
+  --warning-soft: #fffbeb;
+  --warning-ink: #b45309;
+  --danger-soft: #fef2f2;
+  --danger-ink: #b91c1c;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-focus: #ef4444;
   --field-bg: #ffffff;
   --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 4px 16px -8px rgb(15 23 42 / 0.08);
   --shadow-float: 0 8px 30px -10px rgb(15 23 42 / 0.18);
@@ -91,6 +100,15 @@
   --on-brand: #ffffff;
   --brand-soft: #04221f;
   --brand-ink: #6ee7b7;
+  --success-soft: #04221f;
+  --success-ink: #6ee7b7;
+  --warning-soft: #1c1910;
+  --warning-ink: #fbbf24;
+  --danger-soft: #1c1010;
+  --danger-ink: #f87171;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-focus: #ef4444;
   --field-bg: #151c19;
   --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
   --shadow-float: 0 12px 40px -12px rgb(0 0 0 / 0.7);
@@ -216,23 +234,23 @@
     justify-content: center;
     gap: 0.5rem;
     border-radius: var(--radius-xl);
-    background: #dc2626;
+    background: var(--danger);
     padding: 0.5rem 1rem;
     font-size: 0.875rem;
     font-weight: 600;
-    color: #ffffff;
+    color: var(--on-brand);
     transition: background 0.15s ease, opacity 0.15s ease;
     outline: none;
   }
   .btn-danger:hover {
-    background: #b91c1c;
+    background: var(--danger-hover);
   }
   .btn-danger:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
   .btn-danger:focus-visible {
-    outline: 2px solid color-mix(in srgb, #ef4444 40%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--danger-focus) 40%, transparent);
     outline-offset: 2px;
   }
   .btn-sm {
@@ -310,16 +328,16 @@
     color: var(--brand-ink);
   }
   .badge-success {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--success-soft);
+    color: var(--success-ink);
   }
   .badge-warning {
-    background: #fffbeb;
-    color: #b45309;
+    background: var(--warning-soft);
+    color: var(--warning-ink);
   }
   .badge-danger {
-    background: #fef2f2;
-    color: #b91c1c;
+    background: var(--danger-soft);
+    color: var(--danger-ink);
   }
 
   /* Card titles */
@@ -335,7 +353,7 @@
 
   /* Brand gradient panel */
   .brand-gradient {
-    background-image: linear-gradient(135deg, #10b981 0%, #0d9488 50%, #0f766e 100%);
+    background-image: linear-gradient(135deg, var(--color-brand-500) 0%, var(--color-brand-700) 50%, var(--color-brand-900) 100%);
   }
 
   /* Glassy translucent surface (topbar / overlays) — light only;
@@ -421,7 +439,7 @@
 
   /* Brand gradient clipped to text — for hero numbers / headings. */
   .gradient-text {
-    background-image: linear-gradient(135deg, #34d399 0%, #0d9488 100%);
+    background-image: linear-gradient(135deg, var(--color-brand-300) 0%, var(--color-brand-700) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;

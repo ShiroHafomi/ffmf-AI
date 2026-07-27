@@ -144,14 +144,14 @@ export default function AdminPage() {
           icon={<Icon name="users" />}
           action={
             <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 dark:text-ink-400">
                 <Icon name="search" className="h-4 w-4" />
               </span>
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t("common.searchPlaceholder")}
-                className="input w-44 py-1.5 pl-9 text-xs"
+                className="input w-44 py-1.5 pl-9 text-xs placeholder:text-ink-500 dark:placeholder:text-ink-400"
               />
             </div>
           }

@@ -22,6 +22,7 @@ from routes.expenses import router as expenses_router
 from routes.auth import router as auth_router
 from routes.households import router as households_router
 from routes.dashboard import router as dashboard_router
+from routes.ai import router as ai_router
 
 # Tải biến môi trường từ file .env (CORS_ORIGINS, AI_SERVICE_API_KEY, ...) trước.
 load_dotenv()
@@ -93,14 +94,17 @@ _API_DESCRIPTION = """
 The **FFMS AI Microservice** predicts a household's next-month spending and turns
 its financial history into actionable insights.
 
-- 🔮 **Deterministic forecasting** — Linear Regression for short series, Holt
-  exponential smoothing (+ seasonal adjustment) for longer ones. Free, offline,
-  reproducible.
-- 📚 **RAG-enriched suggestions** — an offline TF-IDF retriever grounds the tips.
+- 🔮 **Ensemble forecasting** — Linear Regression + Holt + Holt-Winters,
+  weighted by in-sample fit. Free, offline, reproducible.
+- 📊 **Multi-month forecast** — project N months ahead with prediction intervals.
+- 🚨 **Anomaly detection** — identify spending spikes and dips vs. the median.
+- 💰 **Savings plan** — project surpluses/deficits over 6 months with targets.
+- ⚖️ **Budget optimizer** — suggested per-category budget allocations.
+- 📂 **Category insights** — deep per-category trend, forecast, and optimization.
+- 📚 **RAG-enriched suggestions** — an offline TF-IDF retriever with query
+  expansion and seasonal matching grounds the tips.
 - 🤖 **Optional LLM** — strictly opt-in via `LLM_PROVIDER` (Claude or any
   OpenAI-compatible endpoint); any failure falls back to the deterministic model.
-- 📊 **Insights** — category breakdown, anomaly detection, savings projection,
-  cutback levers, alert thresholds, and walk-forward forecast quality.
 
 **Auth:** all routes except `/` require the `X-API-Key` header when
 `AI_SERVICE_API_KEY` is configured. **Rate limit:** per-IP, configurable.
@@ -115,6 +119,7 @@ _TAGS_METADATA = [
     {"name": "Auth", "description": "Internal user provisioning (mirrors the Node backend)."},
     {"name": "Expenses", "description": "Expense CRUD, called internally by the Node backend."},
     {"name": "Households", "description": "Household & membership management (owner-gated)."},
+    {"name": "AI-Powered", "description": "Multi-month forecast, anomaly detection, savings plan, budget optimizer, and category insights."},
 ]
 
 # Khởi tạo ứng dụng FastAPI (phải định nghĩa trước các decorator @app.*).
@@ -246,3 +251,4 @@ app.include_router(expenses_router)
 app.include_router(auth_router)
 app.include_router(households_router)
 app.include_router(dashboard_router)
+app.include_router(ai_router)

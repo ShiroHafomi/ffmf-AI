@@ -18,14 +18,18 @@ from services.ai_service import (
     analyze_income,
     deterministic_forecast,
     detect_anomalies,
+    ensemble_forecast,
     evaluate_alert_thresholds,
     forecast_category_breakdown,
     generate_savings_advice,
     holt_forecast,
+    holt_winters_forecast,
     linear_regression_predict,
     predict_next_month,
     rag_predict,
+    residual_based_interval,
     suggest_cutbacks,
+    trend_analysis,
 )
 
 
@@ -97,19 +101,20 @@ def test_finalize_rag_accepts_valid_input():
 def test_finalize_rag_rejects_out_of_range():
     data = _series([100, 100, 100, 100])
     out = _finalize_rag(_valid_tool_input(999999), data, "total_expense", "")
-    assert out["method"].startswith("fallback")
+    # Out-of-range LLM predictions now fall back to the ensemble forecaster.
+    assert out["method"] == "ensemble"
 
 
 def test_finalize_rag_rejects_negative():
     data = _series([100, 100, 100])
     out = _finalize_rag(_valid_tool_input(-5), data, "total_expense", "")
-    assert out["method"].startswith("fallback")
+    assert out["method"] == "ensemble"
 
 
 def test_finalize_rag_rejects_unparseable_predicted():
     data = _series([100, 100, 100])
     out = _finalize_rag({"predicted": "not-a-number"}, data, "total_expense", "")
-    assert out["method"].startswith("fallback")
+    assert out["method"] == "ensemble"
 
 
 def test_finalize_rag_rejects_malformed_suggestions():
@@ -117,7 +122,7 @@ def test_finalize_rag_rejects_malformed_suggestions():
     bad = _valid_tool_input(110)
     bad["suggestions"] = "should-be-a-list"
     out = _finalize_rag(bad, data, "total_expense", "")
-    assert out["method"].startswith("fallback")
+    assert out["method"] == "ensemble"
 
 
 def test_finalize_rag_defaults_unknown_confidence():
@@ -132,7 +137,7 @@ def test_finalize_rag_defaults_unknown_confidence():
 def test_rag_predict_deterministic_mode_never_calls_llm():
     data = _series([100, 200, 300, 400])
     out = rag_predict(data, amount_key="total_expense")
-    assert out["method"].startswith("fallback")
+    assert out["method"] == "ensemble"
     assert "predicted" in out and out["predicted"] >= 0
 
 
@@ -238,12 +243,114 @@ def test_forecast_category_breakdown():
     assert out[0]["predicted"] >= 0
 
 
-def test_rag_fallback_survives_broken_deterministic(monkeypatch):
-    """Even if the deterministic model raises, the service returns a valid dict."""
+def test_rag_fallback_survives_broken_ensemble(monkeypatch):
+    """If the ensemble forecaster raises, _rag_fallback falls back
+    to deterministic. If deterministic also fails, returns safe zero."""
     def boom(*a, **k):
-        raise RuntimeError("model exploded")
+        raise RuntimeError("ensemble exploded")
 
+    monkeypatch.setattr(ai_service, "ensemble_forecast", boom)
     monkeypatch.setattr(ai_service, "deterministic_forecast", boom)
     out = ai_service._rag_fallback(_series([100, 200, 300]), "total_expense", "test")
     assert out["predicted"] == 0.0
     assert out["method"] == "fallback_error"
+
+
+# ───────────────────────── Ensemble forecaster ─────────────────────────
+def test_ensemble_forecast_returns_valid_prediction():
+    """Ensemble forecast always returns a number and a method label."""
+    data = _series([100, 200, 300, 400])
+    pred, method, per_model = ensemble_forecast(data, "total_expense")
+    assert pred >= 0
+    assert isinstance(method, str)
+    assert isinstance(per_model, dict)
+
+
+def test_ensemble_forecast_rises_with_upward_series():
+    data = _series([100, 200, 300, 400])
+    pred, _, _ = ensemble_forecast(data, "total_expense")
+    assert pred > 300
+
+
+def test_ensemble_forecast_flat_for_flat_series():
+    data = _series([500, 500, 500, 500])
+    pred, _, _ = ensemble_forecast(data, "total_expense")
+    assert pred == pytest.approx(500.0, abs=50.0)
+
+
+def test_ensemble_forecast_short_series():
+    """With only 2 points, ensemble still produces a valid result."""
+    data = _series([100, 200])
+    pred, method, per_model = ensemble_forecast(data, "total_expense")
+    assert pred >= 0
+    assert isinstance(per_model, dict)
+
+
+# ───────────────────────── Holt-Winters ─────────────────────────
+def test_holt_winters_forecast_returns_positive():
+    out = holt_winters_forecast([100, 120, 140, 160])
+    assert out > 0
+
+
+def test_holt_winters_forecast_rises_for_linear_series():
+    """A linearly increasing series should be forecasted higher."""
+    out = holt_winters_forecast([100, 200, 300, 400])
+    assert out > 300
+
+
+# ───────────────────────── Trend analysis ─────────────────────────
+def test_trend_analysis_detects_upward_trend():
+    data = _series([100, 200, 300, 400])
+    out = trend_analysis(data, "total_expense")
+    assert out["direction"] == "increasing"
+    assert out["confidence"] in ("high", "medium", "low")
+
+
+def test_trend_analysis_detects_flat_trend():
+    data = _series([100, 100, 100, 100])
+    out = trend_analysis(data, "total_expense")
+    assert out["direction"] == "flat"
+
+
+def test_trend_analysis_detects_decelerating():
+    """Acceleration check: series that grows but slows."""
+    data = _series([100, 300, 500, 600])
+    out = trend_analysis(data, "total_expense")
+    # The recent months grew less than the full trend, so decelerating.
+    assert out["acceleration"] in ("accelerating", "decelerating", "steady")
+
+
+# ───────────────────────── Residual-based interval ─────────────────
+def test_residual_based_interval_returns_bounds():
+    data = _series([100, 200, 300, 400])
+    interval = residual_based_interval(data, predicted=500, confidence="medium")
+    assert len(interval) == 2
+    assert interval[0] <= 500 <= interval[1]
+    assert interval[0] >= 0
+
+
+def test_residual_based_interval_narrower_for_confident():
+    """High confidence should give a narrower band than low confidence."""
+    data = _series([100, 200, 300, 400])
+    high = residual_based_interval(data, predicted=500, confidence="high")
+    low = residual_based_interval(data, predicted=500, confidence="low")
+    high_width = high[1] - high[0]
+    low_width = low[1] - low[0]
+    assert high_width <= low_width
+
+
+# ───────────────────────── RAG query expansion ─────────────────
+def test_retrieve_with_expanded_query():
+    """Expanded query should still return relevant results."""
+    from services.rag_retriever import retrieve_knowledge
+    # "groceries" should pull the groceries snippet even via expansion.
+    out = retrieve_knowledge("groceries meal bulk", top_k=3)
+    assert len(out) == 3
+    assert any("Groceries are usually" in s for s in out)
+
+
+def test_retrieve_over_budget_with_expansion():
+    """"Exceeded budget" via expansion should surface budget tips."""
+    from services.rag_retriever import retrieve_knowledge
+    out = retrieve_knowledge("exceeded budget warning over budget", top_k=3)
+    assert any("budget" in s.lower() or "overspent" in s.lower() for s in out)

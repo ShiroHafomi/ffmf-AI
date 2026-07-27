@@ -1,3 +1,4 @@
+export { Button } from "./Button";
 export { Card, CardHeader } from "./Card";
 export { StatCard, TrendArrow } from "./Stat";
 export { TrendChart, type TrendPoint } from "./Chart";
