@@ -30,9 +30,7 @@ Thumbs.db
 *.log
 
 # Agent / AI-tooling directories
-.claude/*
-!.claude/settings.json
-!.claude/hooks/
+.claude/
 .agents
 .agent
 .tests
@@ -45,3 +43,20 @@ node_modules/
 
 # Hook audit logs
 logs/
+
+# Docker / deployment
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Environment templates
+.env.example
+
+# Project docs (generated locally)
+CLAUDE.md
+
+# Lock files
+skills-lock.json
+
+# GitHub workflows
+.github/workflows/

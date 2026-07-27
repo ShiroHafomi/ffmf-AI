@@ -1,9 +1,0 @@
-__pycache__/
-*.py[cod]
-.env
-.git/
-.claude/
-.agents/
-tests/
-.pytest_cache/
-*.log
