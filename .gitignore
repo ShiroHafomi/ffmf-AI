@@ -60,3 +60,14 @@ skills-lock.json
 
 # GitHub workflows
 .github/workflows/
+
+# Chặn các file môi trường & bí mật
+.env
+.env.*
+
+# Chặn cấu hình Agent / Claude cá nhân nếu có thông tin nhạy cảm
+.claude/
+.agents/
+
+# Chặn logs & data tạm
+*.log
