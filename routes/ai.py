@@ -1,6 +1,8 @@
 """AI-powered endpoints — forecast, anomaly, savings plan, budget optimizer, category insights."""
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from db.connection import get_connection
@@ -13,6 +15,8 @@ from services.db_service import (
     get_category_expenses,
     get_category_budgets,
     get_monthly_category_expenses,
+    find_user_by_id,
+    get_household_currency,
 )
 from services.ai_service import (
     predict_next_month,
@@ -25,7 +29,15 @@ from services.ai_service import (
     forecast_category_breakdown,
     backtest_forecast,
     trend_analysis,
+    build_financial_coach_context,
+    stream_coach_response,
+    run_text_to_sql_pipeline,
+    classify_intent,
+    INTENT_SQL_QUERY,
+    INTENT_FINANCIAL_ADVICE,
+    INTENT_DOCUMENT_RAG,
 )
+from services.rag_retriever import retrieve_knowledge
 from services.validation import (
     validate_household_id,
     validate_threshold,
@@ -91,6 +103,9 @@ def forecast(
         except ConnectionError as e:
             handle_db_error("get_connection", e)
 
+        # Get default currency for this household
+        household_currency = get_household_currency(household_id, connection=conn)
+
         expenses = get_monthly_expenses(household_id, connection=conn)
         if not expenses:
             raise HTTPException(
@@ -121,6 +136,9 @@ def forecast(
                 amount_key="total_expense",
                 category_context=category_expenses,
                 budget=budget,
+                household_id=household_id,
+                target_currency="VND",
+                connection=conn,
             )
             pred = float(pred_res["predicted"])
             interval = pred_res.get("interval")
@@ -176,6 +194,7 @@ def forecast(
             "forecasts": forecasts,
             "forecast_quality": quality,
             "predicted_income": predicted_income,
+            "currency": household_currency,
         }
 
         cache.set(cache_key, result)
@@ -301,6 +320,9 @@ def savings_plan(
 
         budget = get_latest_budget(household_id, connection=conn)
 
+        # Get household currency for forecasting
+        household_currency = get_household_currency(household_id, connection=conn)
+
         if not expenses and not incomes:
             raise HTTPException(
                 status_code=404,
@@ -319,7 +341,13 @@ def savings_plan(
 
         for i in range(months_forward):
             if recent_exp and len(recent_exp) >= 2:
-                exp_pred = predict_next_month(recent_exp, amount_key="total_expense")
+                exp_pred = predict_next_month(
+                    recent_exp,
+                    amount_key="total_expense",
+                    household_id=household_id,
+                    target_currency="VND",
+                    connection=conn,
+                )
                 exp_val = float(exp_pred["predicted"])
             elif expenses:
                 exp_val = float(expenses[-1]["total_expense"])
@@ -327,7 +355,13 @@ def savings_plan(
                 exp_val = 0.0
 
             if recent_inc and len(recent_inc) >= 2:
-                inc_pred = predict_next_month(recent_inc, amount_key="total_income")
+                inc_pred = predict_next_month(
+                    recent_inc,
+                    amount_key="total_income",
+                    household_id=household_id,
+                    target_currency="VND",
+                    connection=conn,
+                )
                 inc_val = float(inc_pred["predicted"])
             elif incomes:
                 inc_val = float(incomes[-1]["total_income"])
@@ -646,3 +680,355 @@ def category_insights(
     finally:
         if conn is not None and conn.is_connected():
             conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AI Financial Coach — conversational streaming endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class CoachChatRequest(BaseModel):
+    """Request body for the AI Financial Coach chat endpoint."""
+
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        examples=["How can I save 10 million VND in 3 months?"],
+    )
+
+
+@router.post(
+    "/api/ai/coach/chat",
+    summary="AI Financial Coach — conversational chat",
+    response_description="Server-Sent Events stream of coach responses.",
+    responses={
+        200: {
+            "description": "SSE stream with text chunks and optional actions.",
+            "content": {"text/event-stream": {}},
+        },
+        400: {
+            "model": ErrorResponse,
+            "description": "Missing message, or user has no household.",
+        },
+        401: {
+            "model": ErrorResponse,
+            "description": "Missing or invalid X-User-Id header.",
+        },
+        429: {
+            "model": ErrorResponse,
+            "description": "Rate limit exceeded.",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "Internal error.",
+        },
+    },
+)
+@limiter.limit(DEFAULT_LIMIT)
+async def coach_chat(request: Request, payload: CoachChatRequest):
+    """AI Financial Coach — natural-language financial advisor.
+
+    Accepts a natural language query from the user, builds a real-time
+    financial snapshot (income, expenses by category, budgets, savings
+    goals), enriches it with RAG-retrieved financial knowledge, and
+    streams the LLM response as **Server-Sent Events** (SSE).
+
+    **Auth** — requires ``X-User-Id`` header (forwarded from Node
+    backend JWT). The user must belong to a household.
+    """
+    # 1) Auth: resolve X-User-Id → user_id → household_id
+    raw_user_id = request.headers.get("X-User-Id", "")
+    if not raw_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-Id header.")
+    try:
+        user_id = int(raw_user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid X-User-Id header.")
+
+    if user_id < 1:
+        raise HTTPException(status_code=401, detail="Invalid X-User-Id header.")
+
+    try:
+        caller = find_user_by_id(user_id)
+    except ConnectionError as e:
+        handle_db_error("find_user_by_id", e)
+
+    if caller is None:
+        raise HTTPException(status_code=401, detail="User not found.")
+
+    household_id = caller.get("household_id")
+    if not household_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No household found. Please create or join a household "
+                "before using the AI Financial Coach."
+            ),
+        )
+
+    message = (payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required.")
+
+    # 2) Build financial context (sync DB reads on one connection)
+    conn = None
+    try:
+        try:
+            conn = get_connection()
+        except ConnectionError as e:
+            handle_db_error("get_connection", e)
+
+        context = build_financial_coach_context(conn, household_id)
+
+    finally:
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+    # 3) Run offline RAG retrieval against the user's question
+    rag_snippets: list[str] = []
+    try:
+        rag_snippets = retrieve_knowledge(message, top_k=4)
+    except Exception:
+        # RAG is best-effort; coach still works without it
+        pass
+
+    # 4) Stream via SSE
+    return StreamingResponse(
+        stream_coach_response(message, context, rag_snippets),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class DataLookupRequest(BaseModel):
+    """Request body for the Text-to-SQL data lookup endpoint."""
+
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        examples=["How much did I spend at WinMart last week?"],
+    )
+
+
+@router.post(
+    "/api/ai/coach/data-lookup",
+    summary="AI Financial Coach — data lookup via Text-to-SQL",
+    response_description="Generated SQL and query results for a data-lookup question.",
+    responses={
+        200: {"description": "SQL query and result rows."},
+        400: {"model": ErrorResponse, "description": "Missing message, or user has no household."},
+        401: {"model": ErrorResponse, "description": "Missing or invalid X-User-Id header."},
+        404: {"model": ErrorResponse, "description": "LLM not configured or could not answer."},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded."},
+        500: {"model": ErrorResponse, "description": "Internal error."},
+    },
+)
+@limiter.limit(DEFAULT_LIMIT)
+async def data_lookup(request: Request, payload: DataLookupRequest):
+    """Answer a **data-lookup** question by generating a read-only SQL query,
+    executing it against the user's household data, and returning the results.
+
+    Unlike the conversational ``/coach/chat`` endpoint which streams advice,
+    this endpoint returns **structured data** (SQL + rows + optional summary)
+    so the frontend can render the raw query results.
+
+    **Auth** — requires ``X-User-Id`` header (same as coach_chat).
+    The user must belong to a household.
+    """
+    # 1) Auth: resolve X-User-Id → user_id → household_id
+    raw_user_id = request.headers.get("X-User-Id", "")
+    if not raw_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-Id header.")
+    try:
+        user_id = int(raw_user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid X-User-Id header.")
+    if user_id < 1:
+        raise HTTPException(status_code=401, detail="Invalid X-User-Id header.")
+
+    try:
+        caller = find_user_by_id(user_id)
+    except ConnectionError as e:
+        handle_db_error("find_user_by_id", e)
+
+    if caller is None:
+        raise HTTPException(status_code=401, detail="User not found.")
+
+    household_id = caller.get("household_id")
+    if not household_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No household found. Please create or join a household "
+                "before using the data lookup."
+            ),
+        )
+
+    message = (payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required.")
+
+    # 2. Run the Text-to-SQL pipeline
+    conn = None
+    try:
+        try:
+            conn = get_connection()
+        except ConnectionError as e:
+            handle_db_error("get_connection", e)
+
+        result = await run_text_to_sql_pipeline(message, household_id, connection=conn)
+
+    finally:
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Could not answer this data-lookup question. This may be because "
+                "no LLM provider is configured, or the question does not "
+                "translate to a safe read-only query. Try asking the AI Coach "
+                "for advice instead via POST /api/ai/coach/chat."
+            ),
+        )
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Unified AI Chat — intent-routed streaming endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+    "/api/ai/chat/stream",
+    summary="AI Chat — unified intent-routed streaming",
+    response_description="SSE stream (advice/RAG) or structured JSON (SQL queries).",
+    responses={
+        200: {"description": "SSE stream or JSON result depending on intent."},
+        400: {"model": ErrorResponse, "description": "Missing message, or user has no household."},
+        401: {"model": ErrorResponse, "description": "Missing or invalid X-User-Id header."},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded."},
+        500: {"model": ErrorResponse, "description": "Internal error."},
+    },
+)
+@limiter.limit(DEFAULT_LIMIT)
+async def chat_stream(request: Request, payload: CoachChatRequest):
+    """Unified AI chat entrypoint — classifies intent and routes accordingly.
+
+    **Intent routing** (keyword-based, zero LLM cost):
+
+    - ``SQL_QUERY`` → runs Text-to-SQL pipeline, returns structured JSON.
+    - ``FINANCIAL_ADVICE`` → builds real-time context, streams coach advice via SSE.
+    - ``DOCUMENT_RAG`` → runs RAG retrieval, streams coach answer via SSE.
+
+    **Auth** — requires ``X-User-Id`` header (same as /coach/chat).
+    The user must belong to a household.
+    """
+    # 1) Auth: resolve X-User-Id → user_id → household_id
+    raw_user_id = request.headers.get("X-User-Id", "")
+    if not raw_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-Id header.")
+    try:
+        user_id = int(raw_user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid X-User-Id header.")
+
+    if user_id < 1:
+        raise HTTPException(status_code=401, detail="Invalid X-User-Id header.")
+
+    try:
+        caller = find_user_by_id(user_id)
+    except ConnectionError as e:
+        handle_db_error("find_user_by_id", e)
+
+    if caller is None:
+        raise HTTPException(status_code=401, detail="User not found.")
+
+    household_id = caller.get("household_id")
+    if not household_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No household found. Please create or join a household "
+                "before using the AI Chat."
+            ),
+        )
+
+    message = (payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required.")
+
+    # 2) Classify intent
+    intent, confidence = classify_intent(message)
+
+    # 3) Build financial context (used by ADVICE and RAG intents; best-effort)
+    conn = None
+    try:
+        try:
+            conn = get_connection()
+        except ConnectionError as e:
+            handle_db_error("get_connection", e)
+
+        # ── SQL_QUERY ──────────────────────────────────────────
+        if intent == INTENT_SQL_QUERY:
+            result = await run_text_to_sql_pipeline(
+                message, household_id, connection=conn
+            )
+            if result is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "Could not answer this data-lookup question. "
+                        "Try asking the AI Coach for advice instead "
+                        "via a financial-planning question."
+                    ),
+                )
+            result["intent"] = intent
+            result["confidence"] = confidence
+            return result
+
+        # ── FINANCIAL_ADVICE / DOCUMENT_RAG ──────────────────
+        context = build_financial_coach_context(conn, household_id)
+
+    finally:
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+    # RAG retrieval (best-effort; used for both advice and RAG intents)
+    rag_snippets: list[str] = []
+    try:
+        top_k = 6 if intent == INTENT_DOCUMENT_RAG else 4
+        rag_snippets = retrieve_knowledge(message, top_k=top_k)
+    except Exception:
+        pass
+
+    # For DOCUMENT_RAG, prepend the retrieved knowledge as system context
+    # so the LLM prioritises the financial knowledge base over personal data.
+    if intent == INTENT_DOCUMENT_RAG and rag_snippets:
+        # Enrich context.as_text with RAG snippets
+        if context.get("as_text"):
+            rag_block = "\n\nRETRIEVED FINANCIAL KNOWLEDGE (answer primarily from these):\n"
+            for i, snippet in enumerate(rag_snippets, 1):
+                snippet_clean = " ".join(str(snippet).split())
+                rag_block += f"{i}. {snippet_clean}\n"
+            context["as_text"] += rag_block
+
+    # Stream via SSE (same format as coach_chat)
+    return StreamingResponse(
+        stream_coach_response(message, context, rag_snippets),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Intent": intent or "",
+        },
+    )

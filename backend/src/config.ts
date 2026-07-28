@@ -14,5 +14,9 @@ export const config = {
   jwtExpiresMin: Number(process.env.JWT_EXPIRES_MIN ?? 15),
   refreshExpiresDays: Number(process.env.REFRESH_EXPIRES_DAYS ?? 7),
   aiServiceUrl: process.env.AI_SERVICE_URL ?? 'http://localhost:8000',
+  // Server-side key injected as X-Admin-Key when proxying /api/admin/* to the
+  // FastAPI /admin/* routes. Must match ADMIN_API_KEY in the root .env (the
+  // FastAPI service's own config). Empty = fail closed (proxy → 502).
+  adminKey: process.env.ADMIN_API_KEY ?? '',
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000',
 };

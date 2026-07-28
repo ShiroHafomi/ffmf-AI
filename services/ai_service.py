@@ -22,7 +22,9 @@ holt_winters_forecast.
 
 import logging
 import os
+import re
 
+import json
 import numpy as np
 from dotenv import load_dotenv
 from sklearn.linear_model import LinearRegression
@@ -32,8 +34,81 @@ from services.rag_retriever import (
     build_knowledge_query,
     retrieve_knowledge,
 )
+from services.thinking_log import thinking_log
 
 logger = logging.getLogger("ffms")
+
+# Lazy import for currency helpers (avoids circular import)
+def _get_currency_helpers():
+    """Lazy import to avoid circular dependency with db_service."""
+    from services.db_service import get_household_currency, get_exchange_rate, convert_amount
+    return {
+        "get_household_currency": get_household_currency,
+        "get_exchange_rate": get_exchange_rate,
+        "convert_amount": convert_amount,
+    }
+
+
+def convert_forecast_data_to_currency(
+    data: list[dict],
+    amount_key: str,
+    target_currency: str,
+    household_id: int | None = None,
+    connection=None,
+) -> list[dict]:
+    """Convert all amounts in forecast data to a target currency.
+
+    If household_id is provided, it's used to infer the source currency from
+    the data (assuming all data points are in the same currency). If the
+    source currency is already the target, returns data unchanged.
+    """
+    if not data:
+        return data
+
+    # Get the source currency from the first row (assume all same currency)
+    # In real implementation, each row might have its own currency field
+    source_currency = None
+    # Try to get currency from the data if available
+    for row in data:
+        if "currency" in row and row["currency"]:
+            source_currency = row["currency"]
+            break
+
+    if not source_currency and household_id:
+        # Fallback: get default household currency
+        try:
+            from services.db_service import get_household_currency
+            source_currency = get_household_currency(household_id, connection=connection)
+        except Exception:
+            source_currency = "VND"
+
+    if not source_currency:
+        source_currency = "VND"
+
+    if source_currency == target_currency:
+        return data
+
+    # Get exchange rate
+    get_exchange_rate, _ = _get_currency_helpers()
+    rate = get_exchange_rate(source_currency, target_currency, connection)
+
+    if rate <= 0:
+        # Unknown rate - return original data
+        logger.warning(
+            f"No exchange rate from {source_currency} to {target_currency}; "
+            "skipping conversion"
+        )
+        return data
+
+    # Convert all amounts
+    converted = []
+    for row in data:
+        new_row = dict(row)
+        if amount_key in new_row and new_row[amount_key] is not None:
+            new_row[amount_key] = round(float(new_row[amount_key]) * rate, 2)
+        converted.append(new_row)
+
+    return converted
 
 load_dotenv()
 
@@ -71,7 +146,7 @@ def _load_rag_config() -> dict:
 
 _CONFIG = _load_rag_config()
 
-# System prompt ổn định (được cache — xem cache_control trong rag_predict).
+# System prompt ổn định (được cache — xem cache_control r"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)" rag_predict).
 _RAG_SYSTEM = (
     "You are a household finance forecasting assistant for the FFMS app.\n"
     "You are given a household's RETRIEVED monthly spending history (oldest to newest) "
@@ -197,12 +272,24 @@ def deterministic_forecast(
     totals = [float(row.get(amount_key, 0)) for row in data]
     n = len(totals)
     if n < 2:
+        thinking_log.log(
+            step="deterministic_forecast",
+            category="model_selection",
+            input_summary={"n": n, "key": amount_key},
+            reasoning="Not enough data points for any model.",
+            output={"predicted": 0.0, "method": "fallback_none"},
+        )
         return 0.0, "fallback_none"
     if n < 6:
-        return (
-            round(float(linear_regression_predict(data, amount_key)), 2),
-            "fallback_linear_regression",
+        pred = round(float(linear_regression_predict(data, amount_key)), 2)
+        thinking_log.log(
+            step="deterministic_forecast",
+            category="model_selection",
+            input_summary={"n": n, "key": amount_key, "last_value": totals[-1]},
+            reasoning=f"Short series (n={n} < 6) -> Linear Regression (simple trend line).",
+            output={"predicted": pred, "method": "fallback_linear_regression"},
         )
+        return pred, "fallback_linear_regression"
 
     base = holt_forecast(totals)
     method = "fallback_holt"
@@ -210,7 +297,19 @@ def deterministic_forecast(
         months = [int(row.get("month", 0)) for row in data]
         base = _apply_seasonality(totals, months, base)
         method = "fallback_holt_seasonal"
-    return round(float(base), 2), method
+    result = round(float(base), 2)
+    thinking_log.log(
+        step="deterministic_forecast",
+        category="model_selection",
+        input_summary={"n": n, "key": amount_key, "last_value": totals[-1]},
+        reasoning=(
+            f"Longer series (n={n}) -> Holt exponential smoothing"
+            + (" with seasonal adjustment" if n >= 12 else "")
+            + "."
+        ),
+        output={"predicted": result, "method": method},
+    )
+    return result, method
 
 
 # ───────────────────────── Retrieval context builder ─────────────────────────
@@ -409,8 +508,20 @@ def _deterministic_confidence(totals: list[float]) -> str:
         return "low"
     cv = float(np.std(totals)) / mean  # coefficient of variation
     if cv > 0.4:
-        return "low"
-    return "high" if (n >= 12 and cv < 0.25) else "medium"
+        level = "low"
+    elif n >= 12 and cv < 0.25:
+        level = "high"
+    else:
+        level = "medium"
+    thinking_log.log(
+        step="deterministic_confidence",
+        category="confidence",
+        input_summary={"n": n, "cv": round(cv, 3), "mean": round(mean, 2)},
+        reasoning=f"Confidence={level} from n={n}, CV={cv:.3f} "
+        + ("(volatile)" if cv > 0.4 else "(stable)" if cv < 0.25 else "(moderate)"),
+        output={"confidence": level},
+    )
+    return level
 
 
 # ───────────────────────── Holt-Winters (Triple Exponential Smoothing) ─────────
@@ -669,6 +780,20 @@ def ensemble_forecast(
         label = f"ensemble_{best_name}"
 
     per_model = {name: round(float(sc), 4) for name, _, sc in candidates}
+    thinking_log.log(
+        step="ensemble_forecast",
+        category="model_selection",
+        input_summary={"n": n, "key": amount_key, "candidates": len(candidates)},
+        reasoning=(
+            f"Ensemble weighted by time-weighted MSE; "
+            + "; ".join(f"{name}={score:.4f}" for name, _, score in sorted(candidates, key=lambda x: -x[2]))
+        ),
+        output={
+            "predicted": round(ensemble_pred, 2),
+            "method": label,
+            "per_model": per_model,
+        },
+    )
 
     return round(ensemble_pred, 2), label, per_model
 
@@ -682,7 +807,7 @@ def trend_analysis(
 
     Returns a dict with:
       - direction: 'increasing' | 'decreasing' | 'flat'
-      - strength: 'strong' | 'moderate' | 'weak' (based on R² of the trend)
+      - strength: 'sr"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)"' | 'moderate' | 'weak' (based on R² of the trend)
       - acceleration: 'accelerating' | 'decelerating' | 'steady'
       - slope_pct: slope as percentage of the starting value (positive = up)
       - recent_slope_pct: slope over the last 3 months vs. the full period slope
@@ -752,13 +877,31 @@ def trend_analysis(
         acceleration = "steady"
         recent_slope_pct = slope_pct
 
-    # Confidence based on n and R²: high = many points + strong trend, low = few/noisy.
+    # Confidence based on n and R²: high = many points + sr"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)" trend, low = few/noisy.
     if n >= 12 and r2 >= 0.4:
         confidence = "high"
     elif n >= 6 and r2 >= 0.2:
         confidence = "medium"
     else:
         confidence = "low"
+
+    thinking_log.log(
+        step="trend_analysis",
+        category="trend_analysis",
+        input_summary={"n": n, "key": amount_key, "r2": round(r2, 3)},
+        reasoning=(
+            f"Trend direction={direction}, strength={strength}, "
+            + f"acceleration={acceleration}, slope_pct={round(slope_pct, 2)}%, "
+            + f"confidence={confidence} from R²={r2:.3f}"
+        ),
+        output={
+            "direction": direction,
+            "strength": strength,
+            "acceleration": acceleration,
+            "slope_pct": round(slope_pct, 2),
+            "confidence": confidence,
+        },
+    )
 
     return {
         "direction": direction,
@@ -899,6 +1042,26 @@ def _rag_fallback(
         explanation += model_details
     if reason:
         explanation = f"{explanation} ({reason})"
+
+    thinking_log.log(
+        step="rag_fallback",
+        category="fallback",
+        input_summary={
+            "n": len(totals),
+            "key": amount_key,
+            "has_rag": bool(retrieved_knowledge),
+            "reason": reason or "",
+        },
+        reasoning=f"Deterministic model selected ({method})"
+        + (f" — {reason}" if reason else "")
+        + ".",
+        output={
+            "predicted": pred,
+            "interval": interval,
+            "method": method,
+            "confidence": confidence,
+        },
+    )
 
     return {
         "predicted": pred,
@@ -1079,7 +1242,24 @@ def _rag_predict_anthropic(
             data, amount_key, "No tool_use block in response.", retrieved_knowledge
         )
     logger.info("RAG prediction generated via Claude (%s).", model)
-    return _finalize_rag(tool_use.input, data, amount_key, "")
+    result = _finalize_rag(tool_use.input, data, amount_key, "")
+    thinking_log.log(
+        step="llm_call_anthropic",
+        category="llm_call",
+        input_summary={
+            "model": model,
+            "n": len(data),
+            "key": amount_key,
+            "max_tokens": _CONFIG["max_tokens"],
+        },
+        reasoning=f"Claude ({model}) returned structured tool_use — prediction={result['predicted']:.2f}, confidence={result['confidence']}.",
+        output={
+            "predicted": result["predicted"],
+            "method": result["method"],
+            "confidence": result["confidence"],
+        },
+    )
+    return result
 
 
 # ─────────── RAG predict (LLM miễn phí — OpenAI-compatible: Groq/Together/...) ─────
@@ -1158,7 +1338,24 @@ def _rag_predict_openai_compatible(
             data, amount_key, "Could not parse tool arguments.", retrieved_knowledge
         )
     logger.info("RAG prediction generated via OpenAI-compatible LLM (%s).", model)
-    return _finalize_rag(args, data, amount_key, "")
+    result = _finalize_rag(args, data, amount_key, "")
+    thinking_log.log(
+        step="llm_call_openai_compatible",
+        category="llm_call",
+        input_summary={
+            "model": model,
+            "provider": base_url,
+            "n": len(data),
+            "key": amount_key,
+        },
+        reasoning=f"OpenAI-compatible LLM ({model}) returned tool_calls — prediction={result['predicted']:.2f}, confidence={result['confidence']}.",
+        output={
+            "predicted": result["predicted"],
+            "method": result["method"],
+            "confidence": result["confidence"],
+        },
+    )
+    return result
 
 
 # ───────────────────────── RAG predict (orchestrator) ─────────────────────────
@@ -1168,6 +1365,9 @@ def rag_predict(
     category_context: list[dict] | None = None,
     budget: float | None = None,
     kind: str = "expense",
+    household_id: int | None = None,
+    target_currency: str | None = None,
+    connection=None,
 ) -> dict:
     """Forecast the next month.
 
@@ -1195,6 +1395,23 @@ def rag_predict(
     if not data or len(data) < 2:
         return _rag_fallback(data or [], amount_key, "Not enough history.")
 
+    # Convert data to target currency if requested
+    if target_currency and household_id:
+        data = convert_forecast_data_to_currency(
+            data, amount_key, target_currency, household_id, connection
+        )
+        if category_context:
+            category_context = convert_forecast_data_to_currency(
+                category_context, "total", target_currency, household_id, connection
+            )
+        if budget is not None:
+            # Convert budget too
+            from services.db_service import get_household_currency
+            source_currency = get_household_currency(household_id, connection=connection)
+            if source_currency != target_currency:
+                _, convert_amount = _get_currency_helpers()
+                budget = convert_amount(budget, source_currency, target_currency, connection)
+
     # RETRIEVE (offline, always): enrich suggestions with relevant advice.
     # A retrieval failure must never break the forecast.
     retrieved: list[str] = []
@@ -1206,6 +1423,29 @@ def rag_predict(
         retrieved = []
 
     provider = _CONFIG["provider"]
+
+    thinking_log.log(
+        step="rag_predict",
+        category="model_selection",
+        input_summary={
+            "n": len(data),
+            "key": amount_key,
+            "kind": kind,
+            "provider": provider,
+            "has_context": bool(category_context),
+            "budget_set": budget is not None,
+            "rag_hits": len(retrieved),
+            "target_currency": target_currency,
+        },
+        reasoning=(
+            f"Provider={provider}, "
+            + f"data={len(data)} months, "
+            + "RAG-enriched suggestions "
+            + ("available" if retrieved else "unavailable")
+            + "."
+        ),
+        output={"path": provider},
+    )
 
     # Default & recommended: deterministic forecast, retrieval-enriched tips.
     if provider == "deterministic":
@@ -1258,6 +1498,9 @@ def predict_next_month(
     amount_key: str = "total_expense",
     category_context: list[dict] | None = None,
     budget: float | None = None,
+    household_id: int | None = None,
+    target_currency: str | None = None,
+    connection=None,
 ) -> dict:
     """Dự đoán tháng tiếp theo.
 
@@ -1275,6 +1518,9 @@ def predict_next_month(
         category_context=category_context,
         budget=budget,
         kind=kind,
+        household_id=household_id,
+        target_currency=target_currency,
+        connection=connection,
     )
 
 
@@ -1287,7 +1533,7 @@ def analyze(
     """Phân tích kết quả dự đoán so với tháng trước và ngân sách.
 
     ``interval`` là khoảng dự báo [lo, hi] (do ``_prediction_interval`` tính).
-    Nếu cận trên (hi) vượt ngân sách trong khi status vẫn 'normal', tự động
+    Nếu cận trên (hi) vượt ngân sách r"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)" khi status vẫn 'normal', tự động
     nâng lên 'warning' — dựa trên biên độ không chắc chắn thay vì chỉ điểm ước.
     """
 
@@ -1597,6 +1843,23 @@ def backtest_forecast(
         else "deterministic"
     )
 
+    thinking_log.log(
+        step="backtest_forecast",
+        category="backtest",
+        input_summary={"folds": len(acts), "key": amount_key},
+        reasoning=(
+            f"Backtest winner={winner}; "
+            + f"det MAE={det_metrics['mae']:.2f}, skill={det_metrics.get('skill_vs_naive')}; "
+            + f"ens MAE={ens_metrics['mae']:.2f}, skill={ens_metrics.get('skill_vs_naive')}"
+        ),
+        output={
+            "winner": winner,
+            "det_mae": det_metrics["mae"],
+            "ens_mae": ens_metrics["mae"],
+            "folds": len(acts),
+        },
+    )
+
     return {
         "winner": winner,
         "deterministic": det_metrics,
@@ -1664,7 +1927,7 @@ def evaluate_alert_thresholds(
     """Đánh giá ngưỡng cảnh báo (alert threshold) cho từng lever (danh mục).
 
     ``thresholds``: dict ánh xạ category_name -> ngưỡng % (ví dụ 80 = 80% ngân
-    sách). ``default_threshold``: ngưỡng áp dụng cho các lever không có trong
+    sách). ``default_threshold``: ngưỡng áp dụng cho các lever không có r"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)"
     ``thresholds``. Kích hoạt cảnh báo khi ``budget_usage >= threshold``.
 
     Trả về danh sách các lever vượt ngưỡng, sắp xếp theo mức sử dụng giảm dần.
@@ -1864,3 +2127,966 @@ def recommend_actions(
     order = {"high": 0, "medium": 1, "low": 2}
     actions.sort(key=lambda x: order.get(x["priority"], 3))
     return actions
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Text-to-SQL — LLM-generated read-only queries for transaction look-ups
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Database schema excerpt injected into the LLM prompt so it can generate
+# correct, safe SQL.  Only read-accessible tables are documented.
+_DB_SCHEMA_PROMPT = """
+You are a SQL query generator for a household finance database. Generate ONLY
+SELECT statements — never INSERT, UPDATE, DELETE, DROP, or any other mutation.
+
+Database tables (MySQL):
+
+  expenses
+    id            INT PRIMARY KEY
+    household_id  INT          — ALWAYS filter by this
+    category_id   INT          — FK → categories.id
+    user_id       INT          — FK → users.id
+    amount        DECIMAL(12,2)   — positive = spend amount
+    description   TEXT
+    expense_date  DATE
+
+  incomes
+    id            INT PRIMARY KEY
+    household_id  INT          — ALWAYS filter by this
+    amount        DECIMAL(12,2)
+    income_date   DATE
+
+  categories
+    id            INT PRIMARY KEY
+    name          VARCHAR
+    household_id  INT          — custom categories (or NULL for system defaults)
+
+  budgets
+    id            INT PRIMARY KEY
+    household_id  INT          — ALWAYS filter by this
+    category_id   INT
+    amount        DECIMAL(12,2)
+    year, month   INT
+
+  savings_goals
+    id              INT PRIMARY KEY
+    household_id    INT    ← ALWAYS filter by this
+    name            VARCHAR
+    target_amount   DECIMAL(12,2)
+    current_amount  DECIMAL(12,2)
+    created_at      DATE
+
+Save functions:
+  CURDATE()          today's date
+  DATE_SUB(d, INTERVAL N DAY|MONTH|YEAR)
+  YEAR(d), MONTH(d), WEEK(d)
+
+IMPORTANT rules:
+1. Every query MUST have: WHERE household_id = %(household_id)s
+2. Put household_id as %%(household_id)s — the Python parameterised query
+   engine replaces it safely. NEVER type a literal household_id.
+3. Use LIMIT 200 at most.
+4. Return ONLY the raw SQL between ```sql ... ``` markers — no explanation.
+5. For filtering dates, use 'YYYY-MM-DD' format (single-quotes).
+6. For description / name search use LIKE with the parameter
+   %%(<param_name>)s, e.g. WHERE description LIKE CONCAT('%%', %%(search)s, '%%')
+7. For simple questions (e.g. "how much this month"), use a direct query
+   that already exists — do not generate a complex SQL when a simpler
+   summary is enough.
+8. You must consider that a user has a household_id but the calls are for AI
+   Coach queries that may ask about a user's specific expenses descriptions.
+"""
+
+_SQL_EXTRACTION_RE = re.compile(r"```sql\s+(.*?)\s+```", re.DOTALL | re.IGNORECASE)
+
+
+def _parse_sql_from_llm(text: str) -> str | None:
+    """Extract a SQL query from the LLM response.
+
+    Returns the raw SQL if found; ``None`` if parsing fails or the
+    response doesn't contain a code-fenced query.
+    """
+    if not text:
+        return None
+    m = _SQL_EXTRACTION_RE.search(text)
+    if m:
+        return m.group(1).strip()
+    # Fallback: if the response is itself a single SQL line (no markdown fence),
+    # treat it as the query — but only when it starts with SELECT / WITH.
+    candidate = text.strip()
+    if re.match(r"^\s*(SELECT|WITH)\s", candidate, re.IGNORECASE):
+        return candidate
+    return None
+
+
+async def _generate_sql_with_llm(
+    user_message: str, household_id: int
+) -> str | None:
+    """Ask the configured LLM to convert a natural-language question into a
+    read-only SQL query.
+
+    Returns the raw SQL string on success; ``None`` when the LLM is not
+    configured, fails, or cannot parse the response.
+    """
+    config = _load_rag_config()
+    provider = config["provider"]
+
+    if provider == "anthropic":
+        return await _generate_sql_anthropic(user_message, config)
+    if provider == "openai-compatible":
+        return await _generate_sql_openai_compatible(user_message, config)
+
+    # Deterministic / no provider: not available.
+    return None
+
+
+async def _generate_sql_anthropic(
+    user_message: str, config: dict
+) -> str | None:
+    """Use Claude to generate a safe SQL query from a natural-language question."""
+    anthropic_key = config.get("anthropic_api_key", "").strip()
+    if not anthropic_key:
+        return None
+
+    try:
+        from anthropic import AsyncAnthropic
+    except ImportError:
+        logger.warning("Text-to-SQL: anthropic SDK not installed.")
+        return None
+
+    try:
+        client = AsyncAnthropic(
+            api_key=anthropic_key,
+            timeout=config.get("timeout", 20),
+            max_retries=config.get("max_retries", 1),
+        )
+        resp = await client.messages.create(
+            model=config.get("anthropic_model", DEFAULT_MODEL),
+            max_tokens=512,
+            temperature=0,
+            system=[{"type": "text", "text": _DB_SCHEMA_PROMPT}],
+            messages=[{"role": "user", "content": user_message}],
+        )
+    except Exception:
+        logger.warning("Text-to-SQL: Claude call failed.", exc_info=True)
+        return None
+
+    text = " ".join(
+        b.text for b in resp.content if getattr(b, "type", None) == "text"
+    )
+    return _parse_sql_from_llm(text)
+
+
+async def _generate_sql_openai_compatible(
+    user_message: str, config: dict
+) -> str | None:
+    """Use an OpenAI-compatible LLM to generate a safe SQL query."""
+    base_url = config.get("openai_base_url", "").strip()
+    api_key = config.get("openai_api_key", "").strip()
+    model = config.get("openai_model", "").strip()
+
+    is_local = any(
+        t in (base_url or "")
+        for t in ("localhost", "127.0.0.1", ":11434")
+    )
+    if not base_url or not model or (not api_key and not is_local):
+        return None
+
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        logger.warning("Text-to-SQL: openai SDK not installed.")
+        return None
+
+    try:
+        client = AsyncOpenAI(
+            api_key=api_key or "not-needed",
+            base_url=base_url,
+            timeout=config.get("timeout", 20),
+            max_retries=config.get("max_retries", 1),
+        )
+        resp = await client.chat.completions.create(
+            model=model,
+            max_tokens=512,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": _DB_SCHEMA_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+        )
+    except Exception:
+        logger.warning(
+            "Text-to-SQL: OpenAI-compatible call failed.", exc_info=True
+        )
+        return None
+
+    text = (
+        resp.choices[0].message.content
+        if resp.choices and resp.choices[0].message
+        else ""
+    )
+    return _parse_sql_from_llm(text)
+
+
+async def run_text_to_sql_pipeline(
+    user_message: str,
+    household_id: int,
+    connection=None,
+) -> dict | None:
+    """Try to answer a data-lookup question by generating SQL, executing it,
+    and returning the structured results.
+
+    Returns a dict with keys:
+      - ``sql``     — the generated SQL (str or None)
+      - ``rows``    — list of dict result rows (may be empty)
+      - ``summary`` — brief natural-language summary from the LLM (or None)
+
+    Returns ``None`` when the LLM is not configured or cannot generate SQL.
+    This is safe: the caller can fall back to the regular coach chat flow.
+    """
+    # 1) Generate SQL from the user's question.
+    sql = await _generate_sql_with_llm(user_message, household_id)
+    if not sql:
+        return None
+
+    # 2) Execute via the safe read-only executor (wrapped in db_service).
+    try:
+        from services.db_service import execute_readonly_query
+
+        rows = execute_readonly_query(sql, household_id, connection=connection)
+    except ValueError as exc:
+        logger.info(
+            "Text-to-SQL: generated query rejected by safety check — %s", exc
+        )
+        return {"sql": sql, "rows": [], "summary": None}
+    except Exception:
+        logger.warning(
+            "Text-to-SQL: DB execution failed.", exc_info=True
+        )
+        return {"sql": sql, "rows": [], "summary": None}
+
+    # 3) Optionally summarise results via the LLM (best-effort).
+    summary = None
+    if rows:
+        try:
+            summary = await _summarise_query_results(
+                user_message, sql, rows
+            )
+        except Exception:
+            logger.warning(
+                "Text-to-SQL: summary generation failed.", exc_info=True
+            )
+
+    return {"sql": sql, "rows": list(rows), "summary": summary}
+
+
+async def _summarise_query_results(
+    user_message: str, sql: str, rows: list[dict]
+) -> str | None:
+    """Ask the LLM to write a short, natural-language summary of the query results."""
+    if not rows:
+        return None
+
+    config = _load_rag_config()
+    provider = config["provider"]
+
+    prompt = (
+        "The user asked:\n"
+        f"\"{user_message}\"\n\n"
+        "The database returned these rows for their question:\n"
+        f"{json.dumps(rows[:50], default=str, ensure_ascii=False)}\n\n"
+        "Provide a short, clear summary (2-3 sentences max) in the user's "
+        "language (Vietnamese or English). Answer the user's question "
+        "directly — quote the numbers from the dataset."
+    )
+
+    if provider == "anthropic":
+        return await _summarise_with_anthropic(prompt, config)
+    if provider == "openai-compatible":
+        return await _summarise_with_openai(prompt, config)
+
+    return None
+
+
+async def _summarise_with_anthropic(prompt: str, config: dict) -> str | None:
+    """Call Claude for result summarization."""
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None
+
+    anthropic_key = config.get("anthropic_api_key", "").strip()
+    if not anthropic_key:
+        return None
+
+    try:
+        client = Anthropic(
+            api_key=anthropic_key,
+            timeout=config.get("timeout", 20),
+            max_retries=config.get("max_retries", 1),
+        )
+        resp = client.messages.create(
+            model=config.get("anthropic_model", DEFAULT_MODEL),
+            max_tokens=256,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(
+            b.text for b in resp.content if getattr(b, "type", None) == "text"
+        )
+        return text.strip() or None
+    except Exception:
+        logger.warning("Text-to-SQL summary: Claude call failed.", exc_info=True)
+        return None
+
+
+async def _summarise_with_openai(prompt: str, config: dict) -> str | None:
+    """Call an OpenAI-compatible endpoint for summarization."""
+    base_url = config.get("openai_base_url", "").strip()
+    api_key = config.get("openai_api_key", "").strip()
+    model = config.get("openai_model", "").strip()
+
+    is_local = any(
+        t in (base_url or "")
+        for t in ("localhost", "127.0.0.1", ":11434")
+    )
+    if not base_url or not model or (not api_key and not is_local):
+        return None
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return None
+
+    try:
+        client = OpenAI(
+            api_key=api_key or "not-needed",
+            base_url=base_url,
+            timeout=config.get("timeout", 20),
+            max_retries=config.get("max_retries", 1),
+        )
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=256,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = (
+            resp.choices[0].message.content
+            if resp.choices and resp.choices[0].message
+            else ""
+        )
+        return text.strip() or None
+    except Exception:
+        logger.warning(
+            "Text-to-SQL summary: OpenAI call failed.", exc_info=True
+        )
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Intent classifier — keyword-based routing for the unified chat endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Intent labels returned by classify_intent.
+INTENT_SQL_QUERY = "SQL_QUERY"
+INTENT_FINANCIAL_ADVICE = "FINANCIAL_ADVICE"
+INTENT_DOCUMENT_RAG = "DOCUMENT_RAG"
+
+# --- SQL data-lookup patterns (English + Vietnamese) ---
+_SQL_PATTERNS: list[str] = [
+    # English
+    r"\bhow\s+much\s+did\s+(?:I|we)\s+spend",
+    r"\bwhat\s+did\s+(?:I|we)\s+(?:spend|buy|pay)",
+    r"\blist\s+(?:all|my|our)\s+(?:recent\s+)?(?:transactions?|expenses?|purchases?)",
+    r"\bshow\s+(?:me\s+)?(?:my\s+)?(?:transactions?|expenses?)",
+    r"\bwhen\s+did\s+(?:I|we)\s+(?:last\s+)?(?:spend|buy|pay)",
+    r"\bwhat\s+(?:was|is)\s+(?:the|my|our)\s+(?:biggest|largest|highest|top)\s+(?:expense|spend|purchase|transaction)",
+    r"\bsearch\s+(?:for\s+)?(?:expenses?|transactions?)\b.*(?:description|name|for|with)",
+    r"\bfind\s+(?:all\s+)?(?:expenses?|transactions?)\b",
+    r"\btổng\s+(?:tiền\s+)?chi\s+(?:cho|ở|tại)",
+    r"\b(?:liệt\s+kê|danh\s+sách)\s+(?:chi\s+tiêu|giao\s+dịch|mua\s+sắm)",
+    r"\bchi\s+tiêu\s+(?:cho|ở|tại|về)\s+",
+    r"\btôi\s+(?:đã\s+)?chi\s+(?:bao\s+nhiêu|cho|ở|tại)",
+    r"\b(?:mua|trả|thanh\s+toán)\s+(?:ở|tại|cho)\s",
+    r"\b\d+\s*(?:nghìn|triệu|trăm|ngàn|k)\b",  # Amount mentions
+    r"\b(?:giao\s+dịch|hóa\s+đơn)\s+(?:gần\s+đây|tháng\s+này|tuần\s+này)",
+    # Category + timeframe
+    r"\b(?:spend(?:ing)?)\s+(?:on|at|for|in)\s+(?:category|description)",
+    r"\b(?:my|our)\s+(?:biggest|top)\s+(?:category|area)",
+    # Expense description search
+    r"\b(?:look\s+up|search)\s+(?:that\s+|the\s+)?(?:bill|charge|payment|transaction)",
+]
+
+# --- Advice patterns: questions asking for recommendations, planning, analysis ---
+_ADVICE_PATTERNS: list[str] = [
+    # English
+    r"\bhow\s+(?:can|should|do)\s+(?:I|we|one)\s+(?:save|budget|invest|cut|reduce|plan)",
+    r"\b(?:advise|suggest|recommend|help|guidance)\s+(?:me\s+)?(?:on|with|about)",
+    r"\b(?:what|how)\s+(?:can|should|would)\s+(?:I|we)\s+(?:improve|fix|change|adjust|optimize)",
+    r"\b(?:create|set|start|build|make)\s+a\s+(?:budget|plan|saving|fund|goal)",
+    r"\b(?:should\s+I|is\s+it\s+(?:a\s+)?good\s+(?:idea|to|that))",
+    r"\b(?:my|our)\s+(?:budget|spending|saving|debt|income|goal)",
+    r"\b(?:how\s+(?:much\s+)?)?(?:am\s+I|are\s+we)\s+(?:doing|overspending)",
+    # Vietnamese advice patterns (ASCII-safe fallback)
+    r"\b(?:lam\s+sao|nen\s+|can\s+|hay\s+)(?:tiet\s+kiem|de\s+danh|cat\s+giam)",
+    r"\b(?:tu\s+van|de\s+xuat|goi\s+y|loi\s+khuyen)",
+    r"\b(?:ngan\s+sach|muc\s+tieu|quan\s+ly|ke\s+hoach)",
+    r"\b(?:toi\s+uu|dieu\s+chinh|phan\s+bo)",
+]
+
+# ─────── RAG / general knowledge patterns ──────────
+_RAG_PATTERNS: list[str] = [
+    r"\bwhat\s+(?:is|are|does)\s+(?:the\s+)?(?:50\s*/\s*30\s*/\s*20|emergency\s+fund|inflation|compound\s+interest|net\s+worth)",
+    r"\b(?:explain|define|meaning|what\s+(?:exactly|does|is)|tell\s+me\s+about)\s+",
+    r"\bhow\s+(?:does|is|are|do)\s+(?!(?:I|we|you)\b)",
+    r"\b(?:general|concept)\s+(?:advice|knowledge|information)\s+(?:about|on)",
+    r"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)",
+    r"\b(?:luật\s+(?:50|80|70)\s*(?:/|-|và)\s*(?:30|20))",
+    r"\b(?:giải|thích|cho\s+biết)\s+(?:về|khái\s+niệm)",
+    r"\b(?:should|can)\s+(?:I|we)\s+(?:save|invest|spend)\s+(?:my|our)\s+(?:bonus|salary|income) (?:\?|at\s+(?:all|the\send|the\sbeginning))",
+    r"\b(?:chiến\s+lược|phương\s+pháp|phương\s+án)\s+(?:tiết\s+kiệm|tiền\s+tiết|tiền)\b",
+]
+
+
+
+
+def classify_intent(user_message: str) -> tuple[str, float]:
+    """Classify a user message into one of three intents.
+
+    Returns (intent_label, confidence_score) where confidence is 0.0–1.0.
+
+    **Built entirely on keyword/pattern matching** — zero LLM calls,
+    zero network, zero API keys. Deterministic and predictable.
+
+    The three intents:
+
+    * ``SQL_QUERY`` — the user is asking a data-lookup question whose
+      answer is a set of records from their household database (e.g.
+      \"How much did I spend at WinMart this month?\").
+    * ``FINANCIAL_ADVICE`` — the user is asking for personalised
+      advice based on their financial situation (e.g. \"How can I
+      save 10 million VND in 3 months?\").
+    * ``DOCUMENT_RAG`` — the user is asking a general financial
+      knowledge question that should be answered from the RAG snippets
+      (e.g. \"What is the 50/30/20 rule?\"). These questions usually
+      don't require the user's own data.
+    """
+    msg = (user_message or "").strip()
+    if not msg:
+        return INTENT_FINANCIAL_ADVICE, 0.0
+
+    msg_lower = msg.lower()
+
+    # Score each intent by counting pattern matches.
+    def _count_matches(patterns: list[str]) -> int:
+        return sum(
+            1 for p in patterns
+            if re.search(p, msg, re.IGNORECASE | re.DOTALL | re.UNICODE)
+        )
+
+    sql_hits = _count_matches(_SQL_PATTERNS)
+    advice_hits = _count_matches(_ADVICE_PATTERNS)
+    rag_hits = _count_matches(_RAG_PATTERNS)
+
+    # If nothing matched, default to FINANCIAL_ADVICE (most common).
+    total = sql_hits + advice_hits + rag_hits
+    if total == 0:
+        return INTENT_FINANCIAL_ADVICE, 0.3
+
+    # Normalise to get confidence-like score (0..1).
+    scores = {
+        INTENT_SQL_QUERY: sql_hits / total,
+        INTENT_FINANCIAL_ADVICE: advice_hits / total,
+        INTENT_DOCUMENT_RAG: rag_hits / total,
+    }
+    best = max(scores, key=scores.__getitem__)  # type: ignore[arg-type]
+    return best, round(scores[best], 2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AI Financial Coach — conversational streaming advisor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from datetime import datetime  # noqa: F811 — used by build_financial_coach_context
+from typing import AsyncGenerator
+
+from services.rag_retriever import retrieve_knowledge as _rag_retrieve
+
+
+def build_financial_coach_context(
+    connection, household_id: int
+) -> dict:
+    """Xây dựng snapshot tài chính của hộ để inject vào system prompt của coach.
+
+    Hàm này gọi 4 truy vấn DB (thu nhập tháng này, chi tiêu theo danh mục,
+    ngân sách theo danh mục, mục tiêu tiết kiệm) trên CÙNG một connection.
+    Mỗi truy vấn được bọc try/except riêng — một truy vấn lỗi không làm sập
+    toàn bộ context. Luôn trả về dict hợp lệ với trường ``as_text``.
+    """
+    now = datetime.now()
+    context: dict = {
+        "household_id": household_id,
+        "current_month": {"year": now.year, "month": now.month},
+        "total_income": 0.0,
+        "total_expenses": 0.0,
+        "categories": [],
+        "savings_goals": [],
+        "budget": None,
+        "as_text": "",
+    }
+
+    # 1) Thu nhập tháng này
+    try:
+        from services.db_service import get_current_month_total_income
+
+        context["total_income"] = round(
+            get_current_month_total_income(household_id, connection=connection), 2
+        )
+    except Exception:
+        logger.warning("Coach context: không lấy được thu nhập tháng.", exc_info=True)
+
+    # 2) Chi tiêu theo danh mục tháng này
+    category_expenses: list[dict] = []
+    try:
+        from services.db_service import get_category_expenses
+
+        category_expenses = get_category_expenses(
+            household_id, month=now.month, year=now.year, connection=connection
+        )
+    except Exception:
+        logger.warning(
+            "Coach context: không lấy được chi tiêu theo danh mục.", exc_info=True
+        )
+
+    # 3) Ngân sách theo danh mục tháng này
+    category_budgets: list[dict] = []
+    try:
+        from services.db_service import get_category_budgets
+
+        category_budgets = get_category_budgets(
+            household_id, month=now.month, year=now.year, connection=connection
+        )
+    except Exception:
+        logger.warning(
+            "Coach context: không lấy được ngân sách danh mục.", exc_info=True
+        )
+
+    # 4) Mục tiêu tiết kiệm
+    savings: list[dict] = []
+    try:
+        from services.db_service import get_savings_goals
+
+        savings = get_savings_goals(household_id, connection=connection)
+    except Exception:
+        logger.warning(
+            "Coach context: không lấy được mục tiêu tiết kiệm.", exc_info=True
+        )
+
+    # --- Tổng hợp categories ---
+    budget_map: dict[str, float] = {}
+    for b in category_budgets:
+        if b.get("category_name"):
+            budget_map[b["category_name"]] = float(b.get("budget_amount", 0) or 0)
+
+    total_spent = 0.0
+    for c in category_expenses:
+        name = c.get("category_name") or "Other"
+        spent = float(c.get("total", 0) or 0)
+        total_spent += spent
+        bud = budget_map.get(name)
+        usage_pct = round((spent / bud * 100), 1) if bud and bud > 0 else None
+        context["categories"].append(
+            {
+                "name": name,
+                "spent": round(spent, 2),
+                "budget": round(bud, 2) if bud else None,
+                "usage_pct": usage_pct,
+            }
+        )
+    context["total_expenses"] = round(total_spent, 2)
+
+    total_budget = (
+        round(sum(budget_map.values()), 2) if budget_map else None
+    )
+    if total_budget is not None and total_budget > 0:
+        context["budget"] = {
+            "total_budget": total_budget,
+            "total_spent": round(total_spent, 2),
+            "remaining": round(total_budget - total_spent, 2),
+            "usage_pct": (
+                round((total_spent / total_budget * 100), 1)
+                if total_budget > 0
+                else None
+            ),
+        }
+
+    # --- Tổng hợp savings goals ---
+    for g in savings:
+        target = float(g.get("target_amount", 0) or 0)
+        current = float(g.get("current_amount", 0) or 0)
+        progress = round((current / target * 100), 1) if target > 0 else 0.0
+        context["savings_goals"].append(
+            {
+                "name": g.get("name", ""),
+                "target": round(target, 2),
+                "current": round(current, 2),
+                "progress_pct": progress,
+            }
+        )
+
+    # --- Xây dựng as_text (đoạn văn bản hiển thị r"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)" system prompt) ---
+    lines: list[str] = []
+    lines.append("USER FINANCIAL CONTEXT")
+    lines.append("=========================")
+    # Tháng hiện tại
+    lines.append(
+        f"Current month: {now.year}-{now.month:02d}"
+    )
+
+    income_str = f"{context['total_income']:,.2f}"
+    lines.append(f"Total Income (this month): {income_str}")
+    lines.append(
+        f"Total Expenses (this month): {context['total_expenses']:,.2f}"
+    )
+
+    if context["budget"]:
+        b = context["budget"]
+        lines.append(
+            f"Total Budget: {b['total_budget']:,.2f} | "
+            f"Spent: {b['total_spent']:,.2f} | "
+            f"Remaining: {b['remaining']:,.2f} ({b['usage_pct']:.1f}%)"
+        )
+
+    # Danh mục
+    if context["categories"]:
+        if context["budget"]:
+            lines.append(
+                "\nCATEGORY BREAKDOWN (spent / budget | % of budget):"
+            )
+            for c in context["categories"]:
+                b_str = f"/ {c['budget']:,.2f}" if c["budget"] else "(no budget)"
+                u_str = (
+                    f"| {c['usage_pct']:.1f}% of budget"
+                    if c["usage_pct"] is not None
+                    else ""
+                )
+                lines.append(
+                    f"  - {c['name']}: {c['spent']:,.2f} {b_str} {u_str}"
+                )
+        else:
+            lines.append("\nCATEGORY BREAKDOWN (spent, no budgets set):")
+            for c in context["categories"]:
+                lines.append(f"  - {c['name']}: {c['spent']:,.2f}")
+
+    # Mục tiêu tiết kiệm
+    if context["savings_goals"]:
+        lines.append("\nSAVINGS GOALS (target | current | progress):")
+        for g in context["savings_goals"]:
+            lines.append(
+                f"  - {g['name']}: target {g['target']:,.2f} | "
+                f"current {g['current']:,.2f} | "
+                f"{g['progress_pct']:.1f}% complete"
+            )
+    else:
+        lines.append("\nSAVINGS GOALS: (no active savings goals)")
+
+    lines.append("")
+    context["as_text"] = "\n".join(lines)
+    return context
+
+
+def _build_coach_system_prompt(
+    context: dict, rag_snippets: list[str]
+) -> str:
+    """Tạo system prompt cho AI Financial Coach.
+
+    Dùng ``context["as_text"]`` (đã format) và các RAG snippet để tạo prompt
+    hướng dẫn LLM trở thành coach tài khoản cá nhân. Hàm thuần tuý, không IO.
+    """
+    preamble = (
+        "You are a helpful, analytical personal finance coach for "
+        "the FFMS (Family Financial Management System) app. "
+        "Your role is to answer the user's financial questions clearly, "
+        "compassionately, and accurately — always grounded in THEIR "
+        "real-time financial data provided below.\n\n"
+        "GROUNDING RULES:\n"
+        "- Base every answer on the USER FINANCIAL CONTEXT below.\n"
+        "- Quote specific amounts when comparing (e.g. 'You spent "
+        "拏5,000 on Food with a budget of 4,000 — 125% usage').\n"
+        "- If asked about data not in the context, say so honestly.\n"
+        "- Suggest actionable, concrete next steps — never be vague.\n"
+        "- Be encouraging, not judgmental. Financial management is hard.\n"
+        "- Respond in the user's language (Vietnamese or English).\n\n"
+        "ACTIONS / RECOMMENDATIONS:\n"
+        "When your response implies a specific action the user should "
+        "take (create a savings goal, adjust a budget, cut back on a "
+        "category), append a [ACTIONS]: block as valid JSON at the very "
+        "end of your reply. The block must be on one line with the "
+        "format:\n"
+        "[ACTIONS]: {\"type\": \"...\", \"description\": \"...\",\n"
+        "  \"priority\": \"high|medium|low\"}\n"
+        "Only include this block when the situation clearly calls for "
+        "a concrete action; otherwise omit it entirely.\n"
+    )
+
+    # Inject financial context
+    if context.get("as_text"):
+        prompt = preamble + "\n" + context["as_text"]
+    else:
+        prompt = preamble
+
+    # Inject RAG-retrieved knowledge snippets
+    if rag_snippets:
+        prompt += "\n\nRETRIEVED FINANCIAL KNOWLEDGE "
+        prompt += "(inspiration for grounded, specific advice):\n"
+        for i, snippet in enumerate(rag_snippets, 1):
+            snippet_clean = " ".join(str(snippet).split())
+            prompt += f"{i}. {snippet_clean}\n"
+
+    return prompt
+
+
+def _extract_actions(text: str) -> dict | None:
+    """Trích xuất khối ``[ACTIONS]: {...}`` từ phản hồi đã hoàn tất.
+
+    Trả về dict JSON nếu parse thành công; ngược lại None.
+    """
+    if not text:
+        return None
+    # Tìm [ACTIONS]: theo sau là {json}
+    m = re.search(
+        r"\[ACTIONS\]\s*:\s*(\{(?:[^{}]|(?:\{[^{}]*\}))*\})",
+        text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        # We accept a list of action entries from the model
+        return {"actions": data}
+    return None
+
+
+async def stream_coach_response(
+    user_message: str,
+    context: dict,
+    rag_snippets: list[str],
+) -> AsyncGenerator[str, None]:
+    """Stream phản hồi AI Financial Coach qua SSE.
+
+    Hàm async generator: mỗi chunk là một event SSE định dạng
+    ``data: {"text": "...", "done": false}\\n\\n``. Chunk cuối cùng có
+    ``done: true`` và ``actions`` (nếu model đề xuất hành động cụ thể).
+
+    Provider cuối LLM được đọc từ cấu hình hiện tại — khớp cấu hình của
+    ``rag_predict`` (anthropic, openai-compatible).
+    """
+    import json as _json
+
+    # Tải cấu hình hiện tại
+    config = _load_rag_config()
+    provider = config["provider"]
+
+    system_prompt = _build_coach_system_prompt(context, rag_snippets)
+
+    full_text: str = ""
+
+    thinking_log.log(
+        step="coach_session_start",
+        category="coach",
+        input_summary={
+            "provider": provider,
+            "household_id": context.get("household_id"),
+            "msg_len": len(user_message),
+            "rag_hits": len(rag_snippets),
+        },
+        reasoning=f"Coach session starting — provider={provider}, {len(rag_snippets)} RAG snippets.",
+        output={},
+    )
+
+    # ────────── deterministic / không cấu hình ──────────
+    if provider not in ("anthropic", "openai-compatible"):
+        msg = (
+            "I'm sorry, the AI Financial Coach is not configured. "
+            "Please set LLM_PROVIDER and credentials in the service config."
+        )
+        yield (
+            "data: "
+            + _json.dumps({"text": msg, "done": True, "error": True})
+            + "\n\n"
+        )
+        return
+
+    try:
+        # ────────── Anthropic (Claude) ──────────
+        if provider == "anthropic":
+            anthropic_key = config["anthropic_api_key"]
+            if not anthropic_key:
+                msg = (
+                    "Anthropic is not configured. Please set "
+                    "ANTHROPIC_API_KEY in the service config."
+                )
+                yield (
+                    "data: "
+                    + _json.dumps({"text": msg, "done": True, "error": True})
+                    + "\n\n"
+                )
+                return
+
+            try:
+                from anthropic import AsyncAnthropic
+            except ImportError:
+                msg = (
+                    "Anthropic SDK is not installed. Please install the "
+                    "anthropic package."
+                )
+                yield (
+                    "data: "
+                    + _json.dumps({"text": msg, "done": True, "error": True})
+                    + "\n\n"
+                )
+                return
+
+            client = AsyncAnthropic(
+                api_key=anthropic_key,
+                timeout=config["timeout"],
+                max_retries=config["max_retries"],
+            )
+
+            async with client.messages.stream(
+                model=config["anthropic_model"],
+                max_tokens=config["max_tokens"],
+                temperature=config["temperature"],
+                system=[{"type": "text", "text": system_prompt}],
+                messages=[{"role": "user", "content": user_message}],
+            ) as stream:
+                async for text_chunk in stream.text_stream:
+                    full_text += text_chunk
+                    yield (
+                        "data: "
+                        + _json.dumps({"text": text_chunk, "done": False})
+                        + "\n\n"
+                    )
+
+        # ────────── OpenAI-compatible (Groq / Together / Ollama) ──────────
+        elif provider == "openai-compatible":
+            base_url = config["openai_base_url"]
+            api_key_oc = config["openai_api_key"]
+            model = config["openai_model"]
+
+            is_local = any(
+                t in (base_url or "")
+                for t in ("localhost", "127.0.0.1", ":11434")
+            )
+            if not base_url or not model or (not api_key_oc and not is_local):
+                msg = (
+                    "OpenAI-compatible LLM is not configured. "
+                    "Please set LLM_BASE_URL, LLM_MODEL, and LLM_API_KEY "
+                    "in the service config."
+                )
+                yield (
+                    "data: "
+                    + _json.dumps({"text": msg, "done": True, "error": True})
+                    + "\n\n"
+                )
+                return
+
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                msg = (
+                    "OpenAI SDK is not installed. Please install the openai SDK."
+                )
+                yield (
+                    "data: "
+                    + _json.dumps({"text": msg, "done": True, "error": True})
+                    + "\n\n"
+                )
+                return
+
+            openai_client = AsyncOpenAI(
+                api_key=api_key_oc or "not-needed",
+                base_url=base_url,
+                timeout=config["timeout"],
+                max_retries=config["max_retries"],
+            )
+
+            stream = await openai_client.chat.completions.create(
+                model=model,
+                max_tokens=config["max_tokens"],
+                temperature=config["temperature"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    full_text += delta.content
+                    yield (
+                        "data: "
+                        + _json.dumps({"text": delta.content, "done": False})
+                        + "\n\n"
+                    )
+
+    except Exception as exc:
+        logger.warning(
+            "Coach stream error (%s: %s); returning graceful fallback.",
+            type(exc).__name__,
+            exc.msg if hasattr(exc, "msg") else str(exc),
+        )
+        thinking_log.log(
+            step="coach_session_error",
+            category="coach",
+            input_summary={
+                "error_type": type(exc).__name__,
+                "has_partial_text": bool(full_text),
+            },
+            reasoning=f"Coach stream failed with {type(exc).__name__}; streaming {'partial text' if full_text else 'fallback message'}.",
+            output={"error": True, "text_len": len(full_text)},
+        )
+        if not full_text:
+            full_text = (
+                "Sorry, I'm having trouble processing your request right now. "
+                "Please try again in a moment."
+            )
+            yield (
+                "data: "
+                + _json.dumps(
+                    {"text": full_text, "done": True, "error": True}
+                )
+                + "\n\n"
+            )
+            return
+        # Nếu đã stream một phần mà có lỗi giữa chừng, ghi nhận nhưng
+        # yield done chunk để client biết streaming kết thúc.
+
+    # ────────── Chunk cuối cùng: done + actions (nếu có) ──────────
+    actions = _extract_actions(full_text)
+    thinking_log.log(
+        step="coach_session_end",
+        category="coach",
+        input_summary={"text_len": len(full_text)},
+        reasoning=f"Coach session completed — {len(full_text)} chars, actions={'found' if actions else 'none'}.",
+        output={"has_actions": bool(actions), "text_len": len(full_text)},
+    )
+    yield (
+        "data: "
+        + _json.dumps(
+            {"text": "", "done": True, "actions": actions}
+        )
+        + "\n\n"
+    )
+
+
+
+

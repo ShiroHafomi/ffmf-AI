@@ -9,7 +9,6 @@ venv/
 env/
 .venv/
 
-
 # IDE
 .vscode/
 .idea/
@@ -18,6 +17,9 @@ env/
 
 # Environment variables
 .env
+.env.local
+.env.*.local
+.env.*
 
 # Distribution
 dist/
@@ -38,10 +40,22 @@ Thumbs.db
 
 # Test caches only — the tests/ directory is committed and run in CI
 .pytest_cache/
-/scripts/seed_tranp9436.py
 
 # Node dependencies (never commit; reinstalled via npm ci)
 node_modules/
+
+# Backend build artifacts
+backend/dist/
+backend/*.log
+backend/*.log.*
+backend/.pytest_cache/
+
+# Frontend build artifacts (frontend has its own .gitignore but root patterns help)
+frontend/.next/
+frontend/out/
+frontend/*.tsbuildinfo
+frontend/*.log
+frontend/*.log.*
 
 # Hook audit logs
 logs/
@@ -63,13 +77,5 @@ skills-lock.json
 # GitHub workflows
 .github/workflows/
 
-# Chặn các file môi trường & bí mật
-.env
-.env.*
-
-# Chặn cấu hình Agent / Claude cá nhân nếu có thông tin nhạy cảm
-.claude/
-.agents/
-
-# Chặn logs & data tạm
-*.log
+# Seed script (test data for specific user)
+/scripts/seed_tranp9436.py

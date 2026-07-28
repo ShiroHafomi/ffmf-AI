@@ -23,6 +23,9 @@ from routes.auth import router as auth_router
 from routes.households import router as households_router
 from routes.dashboard import router as dashboard_router
 from routes.ai import router as ai_router
+from routes.excel import router as excel_router
+from routes.admin import router as admin_router
+from routes.admin_dashboard import router as admin_dashboard_router
 
 # Tải biến môi trường từ file .env (CORS_ORIGINS, AI_SERVICE_API_KEY, ...) trước.
 load_dotenv()
@@ -40,6 +43,12 @@ logger = logging.getLogger("ffms")
 # kiểm tra (chỉ dùng khi chạy local / trong mạng tin cậy).
 API_KEY = os.getenv("AI_SERVICE_API_KEY", "").strip()
 _API_KEY_REQUIRED = bool(API_KEY)
+
+# ────────────────────────── Admin API key (separate) ──────────────────────────
+# Admin dashboard endpoints (/admin/*) require a separate key.
+# Leave EMPTY to DISABLE admin endpoints entirely (recommended for prod unless needed).
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+_ADMIN_KEY_REQUIRED = bool(ADMIN_API_KEY)
 
 
 def _constant_time_compare(a: str, b: str) -> bool:
@@ -66,6 +75,27 @@ async def api_key_middleware(request: Request, call_next):
 
             logger.warning(
                 "Từ chối request thiếu/sai API key từ %s: %s",
+                get_remote_address(request),
+                request.url.path,
+            )
+            return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+
+    return await call_next(request)
+
+
+async def admin_key_middleware(request: Request, call_next):
+    """Chặn request thiếu/ sai X-Admin-Key cho /admin/* routes."""
+    # If admin key not configured, hide admin endpoints (return 404)
+    if not _ADMIN_KEY_REQUIRED and request.url.path.startswith("/admin"):
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+    if _ADMIN_KEY_REQUIRED and request.url.path.startswith("/admin"):
+        provided = request.headers.get("X-Admin-Key", "")
+        if not provided or not _constant_time_compare(provided, ADMIN_API_KEY):
+            from slowapi.util import get_remote_address
+
+            logger.warning(
+                "Admin: từ chối request thiếu/sai X-Admin-Key từ %s: %s",
                 get_remote_address(request),
                 request.url.path,
             )
@@ -120,6 +150,8 @@ _TAGS_METADATA = [
     {"name": "Expenses", "description": "Expense CRUD, called internally by the Node backend."},
     {"name": "Households", "description": "Household & membership management (owner-gated)."},
     {"name": "AI-Powered", "description": "Multi-month forecast, anomaly detection, savings plan, budget optimizer, and category insights."},
+    {"name": "Excel", "description": "Excel file upload, extraction, and export — temp processing only, no DB storage."},
+    {"name": "Admin", "description": "System-wide administration: users, households, expenses, budgets, cache, health, logs."},
 ]
 
 # Khởi tạo ứng dụng FastAPI (phải định nghĩa trước các decorator @app.*).
@@ -138,6 +170,7 @@ app = FastAPI(
 # Middleware bảo mật. API-key chạy trước rate-limit để không lãng phí quota
 # cho request không được xác thực.
 app.middleware("http")(api_key_middleware)
+app.middleware("http")(admin_key_middleware)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
@@ -252,3 +285,6 @@ app.include_router(auth_router)
 app.include_router(households_router)
 app.include_router(dashboard_router)
 app.include_router(ai_router)
+app.include_router(admin_router)
+app.include_router(admin_dashboard_router)
+app.include_router(excel_router)

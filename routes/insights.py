@@ -17,6 +17,7 @@ from services.db_service import (
     get_category_budgets,
     get_monthly_incomes,
     get_monthly_category_expenses,
+    get_household_currency,
 )
 from services.ai_service import (
     predict_next_month,
@@ -104,6 +105,9 @@ def insights(
         except ConnectionError as e:
             handle_db_error("get_connection", e)
 
+        # Get household currency for forecasting
+        household_currency = get_household_currency(household_id, connection=conn)
+
         # Bước 1: Dữ liệu chi tiêu theo tháng
         expenses = get_monthly_expenses(household_id, connection=conn)
 
@@ -140,6 +144,9 @@ def insights(
             amount_key="total_expense",
             category_context=category_expenses,
             budget=budget,
+            household_id=household_id,
+            target_currency=household_currency,
+            connection=conn,
         )
         predicted = float(pred_res["predicted"])
         last_month = float(expenses[-1]["total_expense"])
@@ -162,7 +169,13 @@ def insights(
         income_analysis = {}
         inc_res = None
         if incomes and len(incomes) >= 3:
-            inc_res = predict_next_month(incomes, amount_key="total_income")
+            inc_res = predict_next_month(
+                incomes,
+                amount_key="total_income",
+                household_id=household_id,
+                target_currency=household_currency,
+                connection=conn,
+            )
             predicted_income = float(inc_res["predicted"])
             last_month_income = float(incomes[-1]["total_income"])
             income_analysis = analyze_income(predicted_income, last_month_income)
@@ -234,6 +247,7 @@ def insights(
             "budget": budget,
             "category_forecast": category_forecast,
             "forecast_quality": forecast_quality,
+            "currency": household_currency,
         },
         "analysis": {
             "message": analysis["message"],

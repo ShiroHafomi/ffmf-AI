@@ -1,9 +1,13 @@
 """Truy vấn dữ liệu chi tiêu và ngân sách từ MySQL."""
 
+import logging
+import re
 from contextlib import contextmanager
 from datetime import datetime
 
 from db.connection import get_connection
+
+logger = logging.getLogger("ffms")
 
 
 @contextmanager
@@ -209,6 +213,53 @@ def get_category_budgets(
         cursor.execute(query, (household_id, month, year))
         results = cursor.fetchall()
         return results
+
+
+# ───────────────────────── Savings Goals ─────────────────────────
+def get_savings_goals(household_id: int, connection=None) -> list[dict]:
+    """Lấy danh sách mục tiêu tiết kiệm đang hoạt động của hộ.
+
+    Trả về danh sách các mục tiêu (id, name, target_amount, current_amount,
+    created_at), sắp xếp theo ngày tạo (cũ nhất trước) để hiển thị tiến độ
+    tích luỹ theo thời gian. Nếu ``connection`` được truyền vào thì tái sử
+    dụng (route mở 1 connection cho cả request).
+    """
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute(
+            """
+            SELECT id, name, target_amount, current_amount, created_at
+            FROM savings_goals
+            WHERE household_id = %s
+            ORDER BY created_at ASC
+            """,
+            (household_id,),
+        )
+        return cursor.fetchall()
+
+
+def get_current_month_total_income(
+    household_id: int, connection=None
+) -> float:
+    """Tổng thu nhập của hộ trong tháng hiện tại.
+
+    Trả về SUM(amount) từ bảng incomes, lọc theo household_id và tháng/năm
+    hiện tại. Trả về 0.0 nếu không có bản ghi nào. Nếu ``connection`` được
+    truyền vào thì tái sử dụng (route mở 1 connection cho cả request).
+    """
+    now = datetime.now()
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0) AS total
+            FROM incomes
+            WHERE household_id = %s
+              AND MONTH(income_date) = %s
+              AND YEAR(income_date) = %s
+            """,
+            (household_id, now.month, now.year),
+        )
+        result = cursor.fetchone()
+        return float(result["total"]) if result else 0.0
 
 
 # ───────────────────────── Expense CRUD ─────────────────────────
@@ -482,3 +533,406 @@ def find_user_by_id(user_id: int) -> dict | None:
             if cursor is not None:
                 cursor.close()
             connection.close()
+
+
+# ───────────────────────── Debts & Loans ─────────────────────────
+def get_debts_loans(
+    household_id: int,
+    status: str | None = None,
+    connection=None,
+) -> list[dict]:
+    """Get all debts/loans for a household, optionally filtered by status.
+
+    Returns list of dicts with fields from debts_loans table.
+    """
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, _):
+        query = """
+            SELECT id, household_id, `type`, title, total_amount, remaining_amount,
+                   interest_rate, interest_type, start_date, due_date,
+                   payment_frequency, status, notes, currency,
+                   created_at, updated_at
+            FROM debts_loans
+            WHERE household_id = %s
+        """
+        params = [household_id]
+        if status:
+            query += " AND status = %s"
+            params.append(status)
+        query += " ORDER BY due_date ASC"
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+
+def create_debt_loan(
+    household_id: int,
+    debt_type: str,
+    title: str,
+    total_amount: float,
+    remaining_amount: float,
+    interest_rate: float = 0.0,
+    interest_type: str = "REDUCING_BALANCE",
+    start_date: str | None = None,
+    due_date: str | None = None,
+    payment_frequency: str = "MONTHLY",
+    notes: str | None = None,
+    currency: str = "VND",
+    connection=None,
+) -> int:
+    """Create a new debt/loan record. Returns the new debt_id."""
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute(
+            """
+            INSERT INTO debts_loans
+                (household_id, `type`, title, total_amount, remaining_amount,
+                 interest_rate, interest_type, start_date, due_date,
+                 payment_frequency, status, notes, currency)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                household_id,
+                debt_type,
+                title,
+                total_amount,
+                remaining_amount,
+                interest_rate,
+                interest_type,
+                start_date,
+                due_date,
+                payment_frequency,
+                "ACTIVE",
+                notes,
+                currency,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def update_debt_loan(
+    debt_id: int,
+    title: str | None = None,
+    total_amount: float | None = None,
+    remaining_amount: float | None = None,
+    interest_rate: float | None = None,
+    interest_type: str | None = None,
+    start_date: str | None = None,
+    due_date: str | None = None,
+    payment_frequency: str | None = None,
+    status: str | None = None,
+    notes: str | None = None,
+    currency: str | None = None,
+    connection=None,
+) -> bool:
+    """Update a debt/loan record. Returns True if updated."""
+    fields = []
+    params = []
+    if title is not None:
+        fields.append("title = %s")
+        params.append(title)
+    if total_amount is not None:
+        fields.append("total_amount = %s")
+        params.append(total_amount)
+    if remaining_amount is not None:
+        fields.append("remaining_amount = %s")
+        params.append(remaining_amount)
+    if interest_rate is not None:
+        fields.append("interest_rate = %s")
+        params.append(interest_rate)
+    if interest_type is not None:
+        fields.append("interest_type = %s")
+        params.append(interest_type)
+    if start_date is not None:
+        fields.append("start_date = %s")
+        params.append(start_date)
+    if due_date is not None:
+        fields.append("due_date = %s")
+        params.append(due_date)
+    if payment_frequency is not None:
+        fields.append("payment_frequency = %s")
+        params.append(payment_frequency)
+    if status is not None:
+        fields.append("status = %s")
+        params.append(status)
+    if notes is not None:
+        fields.append("notes = %s")
+        params.append(notes)
+    if currency is not None:
+        fields.append("currency = %s")
+        params.append(currency)
+
+    if not fields:
+        return True
+
+    params.append(debt_id)
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute(f"UPDATE debts_loans SET {', '.join(fields)} WHERE id = %s", params)
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_debt_loan(debt_id: int, connection=None) -> bool:
+    """Delete a debt/loan record. Returns True if deleted."""
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute("DELETE FROM debts_loans WHERE id = %s", (debt_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def add_debt_payment(
+    debt_id: int,
+    amount_paid: float,
+    payment_date: str,
+    notes: str | None = None,
+    connection=None,
+) -> int:
+    """Record a payment against a debt/loan. Returns the payment_id."""
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        # Insert payment record
+        cursor.execute(
+            """
+            INSERT INTO debt_payments (debt_id, amount_paid, payment_date, notes)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (debt_id, amount_paid, payment_date, notes),
+        )
+        payment_id = int(cursor.lastrowid)
+
+        # Update remaining_amount on the debt/loan
+        cursor.execute(
+            "UPDATE debts_loans SET remaining_amount = GREATEST(0, remaining_amount - %s) WHERE id = %s",
+            (amount_paid, debt_id),
+        )
+        # If remaining goes to 0, mark as PAID
+        cursor.execute(
+            "UPDATE debts_loans SET status = 'PAID' WHERE id = %s AND remaining_amount <= 0",
+            (debt_id,),
+        )
+        conn.commit()
+    return payment_id
+
+
+def get_debt_payments(debt_id: int, connection=None) -> list[dict]:
+    """Get all payments for a specific debt/loan."""
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, _):
+        cursor.execute(
+            """
+            SELECT id, debt_id, amount_paid, payment_date, notes, created_at
+            FROM debt_payments
+            WHERE debt_id = %s
+            ORDER BY payment_date DESC, id DESC
+            """,
+            (debt_id,),
+        )
+        return cursor.fetchall()
+
+
+def get_debts_due_soon(
+    household_id: int,
+    days: int = 3,
+    connection=None,
+) -> list[dict]:
+    """Get active debts/loans due within `days` days (uses v_debts_due_soon view)."""
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, _):
+        cursor.execute(
+            """
+            SELECT debt_id, household_id, title, remaining_amount, due_date,
+                   payment_frequency, days_until_due
+            FROM v_debts_due_soon
+            WHERE household_id = %s AND days_until_due <= %s
+            ORDER BY days_until_due ASC
+            """,
+            (household_id, days),
+        )
+        return cursor.fetchall()
+
+
+# ───────────────────────── Currency Helpers ─────────────────────────
+def get_household_currency(
+    household_id: int,
+    connection=None,
+) -> str:
+    """Get the default currency for a household (from expenses table, mode).
+
+    Falls back to 'VND' if no expenses exist yet.
+    """
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, _):
+        # First try to get from expenses table (most common source)
+        cursor.execute(
+            """
+            SELECT currency, COUNT(*) as cnt
+            FROM expenses
+            WHERE household_id = %s AND currency IS NOT NULL
+            GROUP BY currency
+            ORDER BY cnt DESC
+            LIMIT 1
+            """,
+            (household_id,),
+        )
+        row = cursor.fetchone()
+        if row and row["currency"]:
+            return row["currency"]
+
+        # Fallback to incomes
+        cursor.execute(
+            """
+            SELECT currency, COUNT(*) as cnt
+            FROM incomes
+            WHERE household_id = %s AND currency IS NOT NULL
+            GROUP BY currency
+            ORDER BY cnt DESC
+            LIMIT 1
+            """,
+            (household_id,),
+        )
+        row = cursor.fetchone()
+        if row and row["currency"]:
+            return row["currency"]
+
+        # Fallback to savings_goals
+        cursor.execute(
+            """
+            SELECT currency, COUNT(*) as cnt
+            FROM savings_goals
+            WHERE household_id = %s AND currency IS NOT NULL
+            GROUP BY currency
+            ORDER BY cnt DESC
+            LIMIT 1
+            """,
+            (household_id,),
+        )
+        row = cursor.fetchone()
+        if row and row["currency"]:
+            return row["currency"]
+
+        # Default
+        return "VND"
+
+
+def get_exchange_rate(
+    from_currency: str,
+    to_currency: str,
+    connection=None,
+) -> float:
+    """Get exchange rate from_currency -> to_currency.
+
+    Currently a stub - returns 1.0 for same currency, 0.0 for unknown pairs.
+    In production, this would query an exchange_rates table or external API.
+    """
+    if from_currency == to_currency:
+        return 1.0
+
+    # Stub: In a real implementation, query exchange_rates table or external API
+    # For now, return 0 to signal "unknown rate"
+    return 0.0
+
+
+def convert_amount(
+    amount: float,
+    from_currency: str,
+    to_currency: str,
+    connection=None,
+) -> float:
+    """Convert amount from one currency to another.
+
+    Returns the converted amount, or the original amount if conversion not possible.
+    """
+    if from_currency == to_currency:
+        return amount
+
+    rate = get_exchange_rate(from_currency, to_currency, connection)
+    if rate <= 0:
+        # Unknown rate - return original amount with a warning
+        return amount
+
+    return round(amount * rate, 2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Text-to-SQL: safe read-only query executor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Patterns that are forbidden in a read-only query — multiline-aware,
+# case-insensitive match on the first non-comment keyword.
+_FORBIDDEN_SQL_KEYWORDS = r"\b(DELETE|INSERT\s+INTO|UPDATE\s+\w+|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|TRUNCATE|GRANT|REVOKE|EXEC(UTE)?\b|CALL\b|LOAD\s+DATA|IMPORT|EXPORT|RENAME\s+TABLE|REPLACE\s+INTO)"
+
+# Only allow SELECT and WITH (CTE) statements.
+_ALLOWED_LEADING = re.compile(
+    r"^\s*(SELECT|WITH)\s", re.IGNORECASE | re.DOTALL
+)
+
+
+def _validate_readonly_sql(sql: str) -> None:
+    """Raise ``ValueError`` if ``sql`` contains forbidden keywords or is not SELECT-only.
+
+    This is a defence-in-depth layer: the LLM-generated SQL is stripped of
+    everything except pure read operations so even a prompt-injection attempt
+    cannot mutate data.
+    """
+    # Strip comments so they can't hide a dangerous keyword.
+    clean = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+    clean = re.sub(r"--[^\n]*", "", clean)
+    clean = re.sub(r"#.*?$", "", clean, flags=re.MULTILINE)
+
+    if not _ALLOWED_LEADING.search(clean):
+        raise ValueError(
+            "Only SELECT (or WITH … SELECT) statements are allowed for "
+            "read-only queries."
+        )
+
+    # Check for forbidden keywords (case-insensitive, word boundaries).
+    forbidden = re.compile(_FORBIDDEN_SQL_KEYWORDS, re.IGNORECASE)
+    match = forbidden.search(clean)
+    if match:
+        raise ValueError(
+            f"Disallowed SQL keyword '{match.group(0).strip()}' "
+            "detected. Only SELECT is permitted."
+        )
+
+    # Reject multi-statement queries.
+    if ";" in clean:
+        raise ValueError("Multiple SQL statements are not allowed.")
+
+
+def execute_readonly_query(
+    sql: str, household_id: int, connection=None
+) -> list[dict]:
+    """Execute a **read-only SELECT** query scoped to a single household.
+
+    Safety invariants (checked before execution):
+      1. Only ``SELECT`` / ``WITH`` statements are accepted.
+      2. Forbidden keywords (INSERT, UPDATE, DELETE, DROP, ...) are rejected.
+      3. Multi-statement queries are rejected.
+      4. ``household_id`` is injected via a bound parameter so no string
+         interpolation is needed — the caller must include the placeholder
+         ``%(household_id)s`` in the SQL text. If it is missing the query
+         returns an empty list (defence against accidental cross-household reads).
+
+    Returns a list of dict rows (keys = column names). Must never exceed
+    ``MAX_ROWS`` rows to prevent accidental resource exhaustion.
+    """
+    MAX_ROWS = 2_000
+
+    sql = (sql or "").strip()
+    if not sql:
+        raise ValueError("SQL query must not be empty.")
+
+    # --- Guard rails ---
+    _validate_readonly_sql(sql)
+
+    # The caller MUST scope by household. We inject the bound value,
+    # not the raw int, so the DB connector handles quoting / types.
+    if "%(household_id)s" not in sql:
+        logger.warning(
+            "Text-to-SQL query missing household_id placeholder; returning empty."
+        )
+        return []
+
+    params: dict = {
+        "household_id": household_id,
+        "max_rows": MAX_ROWS,
+    }
+
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute(sql, params)
+        results = cursor.fetchmany(MAX_ROWS)
+        return results

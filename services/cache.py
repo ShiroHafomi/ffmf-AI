@@ -91,3 +91,49 @@ def clear() -> None:
     """Empty the cache (used by tests)."""
     with _lock:
         _store.clear()
+
+
+# ───────────────────────── Admin functions ─────────────────────────
+def get_admin_stats() -> dict:
+    """Return cache statistics for admin dashboard."""
+    with _lock:
+        now = time.monotonic()
+        by_household: dict[int, int] = {}
+        expired = 0
+        active = 0
+        for key, (expiry, _) in _store.items():
+            if expiry <= now:
+                expired += 1
+            else:
+                active += 1
+                # Parse household_id from key: "endpoint:household_id:..."
+                parts = key.split(":")
+                if len(parts) >= 2 and parts[1].isdigit():
+                    hid = int(parts[1])
+                    by_household[hid] = by_household.get(hid, 0) + 1
+        return {
+            "total_entries": len(_store),
+            "active_entries": active,
+            "expired_entries": expired,
+            "max_entries": _MAX_ENTRIES,
+            "ttl_seconds": CACHE_TTL_SECONDS,
+            "by_household": by_household,
+        }
+
+
+def clear_all() -> int:
+    """Clear entire cache. Returns number of entries removed."""
+    with _lock:
+        count = len(_store)
+        _store.clear()
+        return count
+
+
+def clear_household(household_id: int) -> int:
+    """Clear cache for a specific household. Returns number of entries removed."""
+    target = f":{household_id}:"
+    with _lock:
+        stale = [k for k in _store if target in k]
+        for k in stale:
+            _store.pop(k, None)
+        return len(stale)

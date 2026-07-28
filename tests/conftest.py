@@ -1,6 +1,11 @@
 """Shared pytest fixtures and helpers for the FFMS AI service tests."""
 
+import os
 import pytest
+
+# Admin key must be set BEFORE any test module imports main or routes/admin
+# (pytest loads conftest.py before collecting test modules in the directory).
+os.environ.setdefault("ADMIN_API_KEY", "test-admin-key-123")
 
 
 def collect_paths(app) -> set:

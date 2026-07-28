@@ -12,6 +12,7 @@ from services.db_service import (
     get_category_expenses,
     get_category_budgets,
     get_monthly_incomes,
+    get_household_currency,
 )
 from services.ai_service import (
     predict_next_month,
@@ -103,6 +104,9 @@ def predict(
         # Bước 4: Lấy ngân sách mới nhất
         budget = get_latest_budget(household_id, connection=conn)
 
+        # Get household currency
+        household_currency = get_household_currency(household_id, connection=conn)
+
         # Bước 4.5: Truy xuất (retrieve) phân rã danh mục làm ngữ cảnh cho RAG.
         # Nằm ngoài luồng chính — nếu lỗi truy vấn phụ thì bỏ qua, không làm sập.
         category_expenses: list[dict] = []
@@ -123,6 +127,9 @@ def predict(
             amount_key="total_expense",
             category_context=category_expenses,
             budget=budget,
+            household_id=household_id,
+            target_currency=household_currency,
+            connection=conn,
         )
         predicted = float(pred_res["predicted"])
         last_month = float(expenses[-1]["total_expense"])
@@ -138,7 +145,13 @@ def predict(
         last_month_income = None
         income_analysis = {}
         if incomes and len(incomes) >= 3:
-            inc_res = predict_next_month(incomes, amount_key="total_income")
+            inc_res = predict_next_month(
+                incomes,
+                amount_key="total_income",
+                household_id=household_id,
+                target_currency=household_currency,
+                connection=conn,
+            )
             predicted_income = float(inc_res["predicted"])
             last_month_income = float(incomes[-1]["total_income"])
             income_analysis = analyze_income(predicted_income, last_month_income)
@@ -204,8 +217,9 @@ def predict(
         "income_increase_percent": income_analysis.get("increase_percent"),
         "income_status": income_analysis.get("status"),
         "income_message": income_analysis.get("message"),
-            "income_suggestion": income_analysis.get("suggestion"),
-        }
+        "income_suggestion": income_analysis.get("suggestion"),
+        "currency": household_currency,
+    }
 
         cache.set(cache_key, result)
         return result

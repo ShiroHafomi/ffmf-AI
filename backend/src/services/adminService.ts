@@ -7,20 +7,32 @@ import { ROLE_ID } from '../authz/roles';
 export interface SystemSummary {
   totalUsers: number;
   totalHouseholds: number;
-  totalTransactions: number;
+  totalTransactions: number; // legacy alias of totalExpenses
+  totalExpenses: number;
+  totalIncomes: number;
+  totalBudgets: number;
+  totalCategories: number;
 }
 
-/** Aggregate counts across the system for the admin dashboard. */
+/** Aggregate counts across the system for the admin dashboard (6 stat cards). */
 export async function getSystemSummary(): Promise<SystemSummary> {
   const [users] = await pool.execute<any[]>('SELECT COUNT(*) AS n FROM users');
   const [households] = await pool.execute<any[]>(
     'SELECT COUNT(*) AS n FROM households WHERE is_deleted = 0',
   );
-  const [txns] = await pool.execute<any[]>('SELECT COUNT(*) AS n FROM expenses');
+  const [expenses] = await pool.execute<any[]>('SELECT COUNT(*) AS n FROM expenses');
+  const [incomes] = await pool.execute<any[]>('SELECT COUNT(*) AS n FROM incomes');
+  const [budgets] = await pool.execute<any[]>('SELECT COUNT(*) AS n FROM budgets');
+  const [categories] = await pool.execute<any[]>('SELECT COUNT(*) AS n FROM categories');
+  const totalExpenses = Number(expenses[0]?.n ?? 0);
   return {
     totalUsers: Number(users[0]?.n ?? 0),
     totalHouseholds: Number(households[0]?.n ?? 0),
-    totalTransactions: Number(txns[0]?.n ?? 0),
+    totalExpenses,
+    totalTransactions: totalExpenses, // legacy alias kept for existing consumers
+    totalIncomes: Number(incomes[0]?.n ?? 0),
+    totalBudgets: Number(budgets[0]?.n ?? 0),
+    totalCategories: Number(categories[0]?.n ?? 0),
   };
 }
 

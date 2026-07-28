@@ -357,3 +357,39 @@ class ErrorResponse(BaseModel):
     """Standard FastAPI error envelope (``{"detail": "..."}``)."""
 
     detail: str = Field(examples=["Invalid household_id. Must be a positive integer."])
+
+
+# ───────────────────────── Excel / File Upload & Export ─────────────────────────
+class ExcelUploadResponse(BaseModel):
+    """Structured extraction result for expense/budget file uploads."""
+
+    headers: list[str] = Field(default_factory=list)
+    normalised_headers: list[str] = Field(default_factory=list)
+    data: list[dict] = Field(default_factory=list)
+    skipped: list[dict] = Field(default_factory=list)
+    total_rows: int = 0
+    valid_rows: int = 0
+    skipped_count: int = 0
+
+
+class SheetPreview(BaseModel):
+    """Preview of a single sheet: headers and first few sample rows."""
+
+    headers: list[str] = Field(default_factory=list)
+    sample_rows_cells: list[list] = Field(default_factory=list)
+    total_rows: int = 0
+
+
+class MultiSheetResponse(BaseModel):
+    """General-purpose multi-sheet extraction result."""
+
+    sheets: dict[str, SheetPreview] = Field(default_factory=dict)
+
+
+class ExportPayload(BaseModel):
+    """JSON payload accepted by export endpoints."""
+
+    data: list[dict] = Field(...)
+    columns: list[str] | None = Field(default=None)
+    sheet_name: str = Field(default="Sheet1")
+    filename: str = Field(default="export")
