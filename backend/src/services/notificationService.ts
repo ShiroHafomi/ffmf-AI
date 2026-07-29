@@ -6,6 +6,7 @@ export interface NotificationRow {
   message: string;
   is_read: boolean;
   created_at: string;
+  title?: string;
 }
 
 export interface NewNotification {
@@ -18,9 +19,9 @@ export async function listNotifications(
   onlyUnread = false,
 ): Promise<NotificationRow[]> {
   const sql =
-    `SELECT id, user_id, message, is_read, created_at
+    `SELECT id, user_id, message, read_status as is_read, created_at, title
      FROM notifications
-     WHERE user_id = ?${onlyUnread ? ' AND is_read = 0' : ''}
+     WHERE user_id = ?${onlyUnread ? ' AND read_status = 0' : ''}
      ORDER BY created_at DESC, id DESC`;
   const [rows] = await pool.execute<any[]>(sql, [userId]);
   return rows.map((r) => ({
@@ -29,6 +30,7 @@ export async function listNotifications(
     message: r.message,
     is_read: !!r.is_read,
     created_at: r.created_at,
+    title: r.title,
   }));
 }
 
@@ -37,7 +39,7 @@ export async function getNotification(
   userId: number,
 ): Promise<NotificationRow | null> {
   const [rows] = await pool.execute<any[]>(
-    `SELECT id, user_id, message, is_read, created_at
+    `SELECT id, user_id, message, read_status as is_read, created_at, title
      FROM notifications WHERE id = ? AND user_id = ?`,
     [id, userId],
   );
@@ -49,12 +51,13 @@ export async function getNotification(
     message: r.message,
     is_read: !!r.is_read,
     created_at: r.created_at,
+    title: r.title,
   };
 }
 
 export async function createNotification(data: NewNotification): Promise<number> {
   const [result] = await pool.execute<any>(
-    'INSERT INTO notifications (user_id, message, is_read) VALUES (?, ?, 0)',
+    'INSERT INTO notifications (user_id, message, read_status) VALUES (?, ?, 0)',
     [data.userId, data.message],
   );
   return result.insertId as number;
@@ -63,7 +66,7 @@ export async function createNotification(data: NewNotification): Promise<number>
 // Mark a notification read. Returns true if a matching row was updated.
 export async function markRead(id: number, userId: number): Promise<boolean> {
   const [r] = await pool.execute<any>(
-    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?',
+    'UPDATE notifications SET read_status = 1 WHERE id = ? AND user_id = ?',
     [id, userId],
   );
   return (r.affectedRows ?? 0) > 0;

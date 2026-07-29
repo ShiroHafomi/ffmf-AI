@@ -8,19 +8,22 @@ import {
   type ReactNode,
 } from "react";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { cn } from "@/lib/utils";
 
-type ToastVariant = "success" | "error" | "info";
+type ToastVariant = "success" | "error" | "info" | "warning";
 
 interface ToastItem {
   id: number;
   variant: ToastVariant;
   message: string;
+  title?: string;
 }
 
 interface ToastApi {
-  success: (message: string) => void;
-  error: (message: string) => void;
-  info: (message: string) => void;
+  success: (message: string, title?: string) => void;
+  error: (message: string, title?: string) => void;
+  info: (message: string, title?: string) => void;
+  warning: (message: string, title?: string) => void;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -31,18 +34,7 @@ const ICON_FOR: Record<ToastVariant, IconName> = {
   success: "check",
   error: "alert",
   info: "bulb",
-};
-
-const STYLE_FOR: Record<ToastVariant, string> = {
-  success: "border-l-4 border-emerald-500",
-  error: "border-l-4 border-red-500",
-  info: "border-l-4 border-brand-500",
-};
-
-const ICON_COLOR: Record<ToastVariant, string> = {
-  success: "text-emerald-500",
-  error: "text-red-500",
-  info: "text-brand-500",
+  warning: "alert",
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -53,39 +45,63 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const push = useCallback(
-    (variant: ToastVariant, message: string) => {
+    (variant: ToastVariant, message: string, title?: string) => {
       const id = nextId++;
-      setToasts((prev) => [...prev, { id, variant, message }]);
+      setToasts((prev) => [...prev, { id, variant, message, title }]);
       if (typeof window !== "undefined") {
-        window.setTimeout(() => remove(id), 3500);
+        window.setTimeout(() => remove(id), 4000);
       }
     },
     [remove],
   );
 
   const api: ToastApi = {
-    success: (m) => push("success", m),
-    error: (m) => push("error", m),
-    info: (m) => push("info", m),
+    success: (m, t) => push("success", m, t),
+    error: (m, t) => push("error", m, t),
+    info: (m, t) => push("info", m, t),
+    warning: (m, t) => push("warning", m, t),
   };
 
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="pointer-events-none fixed right-4 top-4 z-[60] flex w-[min(92vw,22rem)] flex-col gap-2">
+      <div
+        className="pointer-events-none fixed right-4 top-4 z-[600] flex w-[min(92vw,24rem)] flex-col gap-2 p-2"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex items-start gap-3 rounded-2xl border border-ink-200 dark:border-ink-700 bg-surface px-4 py-3 shadow-float fade-in-up ${STYLE_FOR[t.variant]}`}
+            className={cn(
+              "toast pointer-events-auto fade-in",
+              {
+                "toast-success": t.variant === "success",
+                "toast-warning": t.variant === "warning",
+                "toast-danger": t.variant === "error",
+                "toast-info": t.variant === "info",
+              }
+            )}
             role="status"
           >
-            <span className={`mt-0.5 shrink-0 ${ICON_COLOR[t.variant]}`}>
-              <Icon name={ICON_FOR[t.variant]} className="h-5 w-5" />
+            <span className="mt-0.5 shrink-0">
+              <Icon
+                name={ICON_FOR[t.variant]}
+                className={cn("h-5 w-5", {
+                  "text-success": t.variant === "success",
+                  "text-warning": t.variant === "warning",
+                  "text-danger": t.variant === "error",
+                  "text-info": t.variant === "info",
+                })}
+              />
             </span>
-            <p className="flex-1 text-sm text-ink-800 dark:text-ink-100">{t.message}</p>
+            <div className="toast-content">
+              {t.title && <p className="toast-title">{t.title}</p>}
+              <p className="toast-message">{t.message}</p>
+            </div>
             <button
               onClick={() => remove(t.id)}
-              className="shrink-0 text-ink-400 transition hover:text-ink-700 dark:hover:text-ink-200"
+              className="toast-close"
               aria-label="Dismiss"
             >
               <Icon name="x" className="h-4 w-4" />

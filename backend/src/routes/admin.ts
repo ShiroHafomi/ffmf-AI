@@ -240,4 +240,73 @@ router.get('/health', requireCapability('system.admin'), async (_req: Request, r
   return res.status(result.status).json(result.data);
 });
 
+// ── Blocklist (proxied to FastAPI) ─────────────────────────────────────────
+router.get(
+  '/blocklist',
+  requireCapability('system.admin'),
+  adminListHandler('blocklist'),
+);
+
+router.post(
+  '/blocklist/:userId',
+  requireCapability('system.admin'),
+  async (req: Request, res: Response) => {
+    const userId = parseIdParam(req.params.userId);
+    if (userId === null) return res.status(400).json({ error: 'invalid userId' });
+
+    const result = await callAdmin(`/admin/blocklist/${userId}`, {
+      method: 'POST',
+      body: { acting_user_id: req.userId!, reason: req.body?.reason ?? null },
+    });
+    return res.status(result.status).json(result.data);
+  },
+);
+
+router.delete(
+  '/blocklist/:userId',
+  requireCapability('system.admin'),
+  async (req: Request, res: Response) => {
+    const userId = parseIdParam(req.params.userId);
+    if (userId === null) return res.status(400).json({ error: 'invalid userId' });
+
+    const result = await callAdmin(`/admin/blocklist/${userId}`, { method: 'DELETE' });
+    return res.status(result.status).json(result.data);
+  },
+);
+
+// ── Create user (proxied to FastAPI) ────────────────────────────────────────
+const createUserBody = z.object({
+  email: z.string().email(),
+  name: z.string().optional(),
+  password: z.string().optional(),
+  role_id: z.union([z.literal(1), z.literal(3)]).optional().default(3),
+  household_id: z.number().int().positive().optional(),
+});
+
+router.post(
+  '/users',
+  requireCapability('system.admin'),
+  async (req: Request, res: Response) => {
+    const body = createUserBody.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: 'Invalid request body', details: body.error.issues });
+    }
+    const result = await callAdmin('/admin/users', { method: 'POST', body: body.data });
+    return res.status(result.status).json(result.data);
+  },
+);
+
+// ── AI Overview (proxied to FastAPI) ────────────────────────────────────────
+router.get(
+  '/ai-overview/:householdId',
+  requireCapability('system.admin'),
+  async (req: Request, res: Response) => {
+    const hid = parseIdParam(req.params.householdId);
+    if (hid === null) return res.status(400).json({ error: 'invalid householdId' });
+
+    const result = await callAdmin(`/admin/ai-overview/${hid}`);
+    return res.status(result.status).json(result.data);
+  },
+);
+
 export default router;

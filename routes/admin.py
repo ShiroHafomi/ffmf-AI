@@ -30,6 +30,10 @@ from services.admin_service import (
     get_system_summary,
     get_system_health,
     read_logs,
+    block_user,
+    unblock_user,
+    list_blocklist,
+    get_ai_overview,
 )
 from services import cache
 
@@ -83,6 +87,11 @@ class UserCreateRequest(BaseModel):
     password: Optional[str] = Field(default=None, description="Optional password (auto-generated if omitted)")
     role_id: int = Field(default=3, description="1 = admin, 3 = member")
     household_id: Optional[int] = Field(default=None, description="Optional household ID to assign user to")
+
+
+class BlockRequest(BaseModel):
+    acting_user_id: int = Field(..., description="ID of the admin performing the block")
+    reason: Optional[str] = Field(default=None, description="Optional reason for blocking")
 
 
 class CacheClearRequest(BaseModel):
@@ -413,3 +422,80 @@ def admin_logs(
     except Exception as e:
         from services.validation import handle_db_error
         handle_db_error("admin_logs", e)
+
+
+# ───────────────────────── Blocklist ─────────────────────────
+@router.get("/admin/blocklist", summary="List blocked users (paginated)")
+@limiter.limit(DEFAULT_LIMIT)
+def admin_list_blocklist(
+    request: Request,
+    page: int = 1,
+    page_size: int = 50,
+    _: None = Depends(require_admin_key),
+):
+    """Return paginated list of currently blocked users."""
+    try:
+        return list_blocklist(page=page, page_size=page_size)
+    except Exception as e:
+        from services.validation import handle_db_error
+        handle_db_error("admin_list_blocklist", e)
+
+
+@router.post("/admin/blocklist/{user_id}", summary="Block a user")
+@limiter.limit(DEFAULT_LIMIT)
+def admin_block_user(
+    request: Request,
+    user_id: int,
+    payload: BlockRequest,
+    _: None = Depends(require_admin_key),
+):
+    """Block a user from authenticating. Re-activates if previously blocked."""
+    if user_id < 1 or payload.acting_user_id < 1:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+    try:
+        return block_user(user_id, payload.acting_user_id, payload.reason)
+    except ValueError as e:
+        msg = str(e).lower()
+        status_code = 404 if "not found" in msg else 400
+        raise HTTPException(status_code=status_code, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        from services.validation import handle_db_error
+        handle_db_error("admin_block_user", e)
+
+
+@router.delete("/admin/blocklist/{user_id}", summary="Unblock a user")
+@limiter.limit(DEFAULT_LIMIT)
+def admin_unblock_user(
+    request: Request,
+    user_id: int,
+    _: None = Depends(require_admin_key),
+):
+    """Remove a user from the active blocklist."""
+    if user_id < 1:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+    try:
+        updated = unblock_user(user_id)
+        return {"user_id": user_id, "unblocked": updated}
+    except Exception as e:
+        from services.validation import handle_db_error
+        handle_db_error("admin_unblock_user", e)
+
+
+# ───────────────────────── AI Overview ─────────────────────────
+@router.get("/admin/ai-overview/{household_id}", summary="AI analysis overview for a household")
+@limiter.limit(DEFAULT_LIMIT)
+def admin_ai_overview(
+    request: Request,
+    household_id: int,
+    _: None = Depends(require_admin_key),
+):
+    """Run all AI analyses (forecast, anomalies, savings, categories) for a household."""
+    if household_id < 1:
+        raise HTTPException(status_code=400, detail="Invalid household_id")
+    try:
+        return get_ai_overview(household_id)
+    except Exception as e:
+        from services.validation import handle_db_error
+        handle_db_error("admin_ai_overview", e)

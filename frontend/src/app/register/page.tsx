@@ -7,7 +7,9 @@ import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useToast } from "@/components/feedback/Toast";
 import AuthLayout from "@/components/AuthLayout";
-import { Icon } from "@/components/ui";
+import { Icon } from "@/components/ui/Icon";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -40,7 +42,7 @@ export default function RegisterPage() {
       footer={
         <>
           {t("register.hasAccount")}{" "}
-          <Link href="/login" className="font-semibold text-brand-700 hover:text-brand-800 dark:text-brand-300">
+          <Link href="/login" className="font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">
             {t("register.signIn")}
           </Link>
         </>
@@ -48,50 +50,61 @@ export default function RegisterPage() {
     >
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
-          <label className="label">{t("register.name")}</label>
-          <input
+          <label htmlFor="name" className="label">
+            {t("register.name")}
+          </label>
+          <Input
+            id="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t("register.namePlaceholder")}
-            className="input"
+            autoComplete="name"
+            required
           />
         </div>
         <div>
-          <label className="label">{t("register.email")}</label>
-          <input
+          <label htmlFor="email" className="label">
+            {t("register.email")}
+          </label>
+          <Input
+            id="email"
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
-            className="input"
+            autoComplete="email"
           />
         </div>
         <div>
-          <label className="label">{t("register.password")}</label>
+          <label htmlFor="password" className="label">
+            {t("register.password")}
+          </label>
           <div className="relative">
-            <input
+            <Input
+              id="password"
               type={showPw ? "text" : "password"}
               required
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("register.passwordPlaceholder")}
-              className="input pr-10"
+              autoComplete="new-password"
+              className="pr-12"
             />
             <button
               type="button"
               onClick={() => setShowPw((s) => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-400 transition hover:text-ink-700 dark:hover:text-ink-200"
-              aria-label={showPw ? "Hide password" : "Show password"}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-muted transition-colors hover:text-text"
+              aria-label={showPw ? t("login.hidePassword") : t("login.showPassword")}
             >
               <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
             </button>
           </div>
         </div>
-        <button type="submit" disabled={busy} className="btn-primary w-full">
+        <Button type="submit" disabled={busy} className="w-full" size="lg">
           {busy ? t("register.submitting") : t("register.submit")}
-        </button>
+        </Button>
       </form>
     </AuthLayout>
   );

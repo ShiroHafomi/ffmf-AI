@@ -139,7 +139,7 @@ export function AISuggestionPanel({
             </>
           ) : (
             <>
-              <Icon name="refresh" className="h-4 w-4" />
+              <Icon name="refreshCw" className="h-4 w-4" />
               {t("dash.suggestions.refresh")}
             </>
           )}

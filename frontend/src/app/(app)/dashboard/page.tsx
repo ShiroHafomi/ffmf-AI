@@ -12,6 +12,8 @@ import { PageSkeleton } from "@/components/feedback/Skeleton";
 import {
   Card,
   CardHeader,
+  CardTitle,
+  CardContent,
   StatCard,
   TrendArrow,
   TrendChart,
@@ -20,9 +22,14 @@ import {
   EmptyState,
   Icon,
   type IconName,
+  Button,
+  Input,
+  Select,
+  Badge,
 } from "@/components/ui";
 import { aggregateByMonth, fmtMoney, fmtDate } from "@/lib/format";
 import { AISuggestionPanel } from "@/components/ai/AISuggestionPanel";
+import { AIChat } from "@/components/ai/AIChat";
 
 type GoalsAdd = (name: string, target: number, current?: number) => Promise<void>;
 
@@ -30,22 +37,27 @@ function QuickActionBtn({
   icon,
   label,
   onClick,
-  accent = "brand",
+  tone = "brand",
 }: {
   icon: IconName;
   label: string;
   onClick: () => void;
-  accent?: string;
+  tone?: "brand" | "emerald" | "amber" | "purple";
 }) {
-  const accentMap: Record<string, string> = {
-    brand: "text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-soft",
-    emerald: "text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10",
-    amber: "text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/10",
+  const toneMap: Record<string, string> = {
+    brand: "text-brand-600 hover:bg-brand-50/80 dark:text-brand-400 dark:hover:bg-brand-500/10",
+    emerald: "text-emerald-600 hover:bg-emerald-50/80 dark:text-emerald-400 dark:hover:bg-emerald-500/10",
+    amber: "text-amber-600 hover:bg-amber-50/80 dark:text-amber-400 dark:hover:bg-amber-500/10",
+    purple: "text-purple-600 hover:bg-purple-50/80 dark:text-purple-400 dark:hover:bg-purple-500/10",
   };
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-xl border border-ink-200 bg-surface px-3 py-2 text-sm font-medium transition hover:shadow-sm dark:border-ink-700 ${accentMap[accent] ?? accentMap.brand}`}
+      className={`
+        inline-flex items-center gap-2 rounded-xl border border-border bg-surface/50 px-3 py-2 text-sm font-medium
+        transition-all duration-200 hover:shadow-sm hover:border-brand-200 dark:hover:border-brand-800
+        ${toneMap[tone] ?? toneMap.brand}
+      `}
     >
       <Icon name={icon} className="h-4 w-4" />
       {label}
@@ -77,7 +89,6 @@ export default function DashboardPage() {
   const canManage = canFn("household.manage");
   const membersRef = useRef<HTMLDivElement>(null);
 
-  // Surface load/action errors as toasts instead of inline banners.
   useEffect(() => {
     if (error) {
       toast.error(error);
@@ -87,7 +98,6 @@ export default function DashboardPage() {
 
   if (loading) return <PageSkeleton />;
 
-  /* No household yet */
   if (!household) {
     return <CreateHousehold busy={busy} onCreate={createHousehold} />;
   }
@@ -107,18 +117,45 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   const remaining = budget?.remaining ?? 0;
+  const budgetProgress = budget?.total_budget
+    ? Math.min(100, Math.round((budget.spent_this_month / budget.total_budget) * 100))
+    : 0;
+  const budgetOver = remaining < 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      {/* Summary stats */}
-      <div className="stagger grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="mx-auto max-w-7xl space-y-6 px-4 sm:px-6">
+      {/* Welcome header */}
+      <div className="glass-panel rounded-2xl p-4 sm:p-6 animate-fade-in-up">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-text tracking-tight">
+              {t("dash.welcome", { name: user?.name?.split(" ")[0] ?? t("common.friend") })}
+            </h1>
+            <p className="mt-1 text-sm text-muted">
+              {t("dash.householdDashboard", { name: household.name ?? t("common.unnamed") })}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge tone={budgetOver ? "danger" : "success"} className="text-xs">
+              {budgetOver ? t("dash.overBudget") : t("dash.onTrack")}
+            </Badge>
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-lg bg-brand-50/80 px-3 py-1.5 text-xs font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+              <Icon name="calendar" className="h-3.5 w-3.5" />
+              {fmtDate(new Date().toISOString().slice(0, 10))}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary stats - glass cards with stagger animation */}
+      <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           hero
           style={{ "--i": 0 } as React.CSSProperties}
           label={t("dash.predictedNextMonth")}
           value={fmtMoney(pred?.predicted)}
           icon={<Icon name="spark" className="h-5 w-5" />}
-          sub={<span>{t("dash.vsLastMonth")}</span>}
+          sub={<span className="text-sm text-muted">{t("dash.vsLastMonth")}</span>}
           trend={<TrendArrow percent={pred?.increase_percent} goodWhenUp={false} />}
         />
         <StatCard
@@ -126,134 +163,212 @@ export default function DashboardPage() {
           label={t("dash.lastMonth")}
           value={fmtMoney(pred?.last_month)}
           icon={<Icon name="wallet" className="h-5 w-5" />}
-          sub={<span>{t("dash.actualSpend")}</span>}
+          sub={<span className="text-sm text-muted">{t("dash.actualSpend")}</span>}
         />
         <StatCard
           style={{ "--i": 2 } as React.CSSProperties}
           label={t("dash.monthlyBudget")}
           value={fmtMoney(budget?.total_budget)}
           icon={<Icon name="target" className="h-5 w-5" />}
-          sub={<span>{fmtMoney(budget?.spent_this_month)} {t("dash.spent")}</span>}
+          sub={
+            <>
+              <span className="text-sm text-muted">{fmtMoney(budget?.spent_this_month)} {t("dash.spent")}</span>
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-brand-50/80 px-2 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+                {budgetProgress}% {t("dash.used")}
+              </span>
+            </>
+          }
         />
         <StatCard
           style={{ "--i": 3 } as React.CSSProperties}
           label={t("dash.remaining")}
           value={fmtMoney(remaining)}
-          accent={remaining < 0 ? "red" : "emerald"}
+          accent={remaining < 0 ? "danger" : "success"}
           icon={<Icon name="trendUp" className="h-5 w-5" />}
-          sub={<span>{remaining < 0 ? t("dash.overBudget") : t("dash.leftThisMonth")}</span>}
+          sub={
+            <span className="text-sm text-muted">
+              {remaining < 0 ? t("dash.overBudget") : t("dash.leftThisMonth")}
+            </span>
+          }
         />
       </div>
+
+      {/* Budget progress bar */}
+      {budget?.total_budget && (
+        <div className="glass-panel rounded-2xl p-4 animate-fade-in-up" style={{ "--staggerIndex": 4 } as React.CSSProperties}>
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium text-text">{t("dash.budgetProgress")}</span>
+                <span className="text-muted">{fmtMoney(budget.spent_this_month)} / {fmtMoney(budget.total_budget)}</span>
+              </div>
+            </div>
+            <Badge tone={budgetOver ? "danger" : budgetProgress > 80 ? "warning" : "success"} className="text-xs shrink-0">
+              {budgetOver ? t("dash.overBudget") : budgetProgress > 80 ? t("dash.nearLimit") : t("dash.onTrack")}
+            </Badge>
+          </div>
+          <ProgressBar
+            value={budget.spent_this_month}
+            max={budget.total_budget}
+            tone={budgetOver ? "danger" : budgetProgress > 80 ? "warning" : "success"}
+            size="md"
+            showLabel
+            labelFormatter={(v) => `${Math.round((v / budget.total_budget) * 100)}%`}
+          />
+        </div>
+      )}
 
       {/* Quick actions */}
       <div className="flex flex-wrap gap-2">
         <QuickActionBtn
-          icon="plus"
+          icon="userPlus"
           label={t("dash.addMember")}
           onClick={() => membersRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          accent="brand"
+          tone="brand"
         />
         <QuickActionBtn
           icon="receipt"
           label={t("dash.addExpense")}
           onClick={() => router.push("/expenses")}
-          accent="brand"
+          tone="emerald"
         />
         <QuickActionBtn
           icon="target"
           label={t("dash.setBudget")}
           onClick={() => router.push("/expenses")}
-          accent="brand"
+          tone="amber"
         />
         <QuickActionBtn
-          icon="spark"
+          icon="flag"
           label={t("dash.addGoal")}
           onClick={() => router.push("/dashboard")}
-          accent="brand"
+          tone="purple"
         />
       </div>
 
-      {/* Trend chart */}
-      <Card className="card-pad">
-        <CardHeader
-          title={t("dash.spendingTrend")}
-          subtitle={t("dash.spendingTrendSub")}
-          action={
-            <Link href="/insights" className="btn-ghost btn-sm">
-              {t("common.viewInsights")}
-            </Link>
-          }
-        />
-        <TrendChart
-          points={months.map((m) => ({ label: m.label, value: m.total, ym: m.ym }))}
-          forecast={forecast}
-        />
-        {!insights && (
-          <p className="mt-3 text-sm text-ink-400 dark:text-ink-500">{t("dash.add3Months")}</p>
-        )}
-      </Card>
-      {/* AI Suggestion Panel — distinct, standalone AI-powered feature */}
-      <AISuggestionPanel householdId={household?.id} onRefresh={loadAll} />
+      {/* Main content grid */}
+      <div className="grid gap-6 lg:grid-cols-12">
+        {/* Left column - 8/12 on desktop */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Spending trend chart */}
+          <Card variant="glass" padding="lg">
+            <CardHeader
+              title={t("dash.spendingTrend")}
+              subtitle={t("dash.spendingTrendSub")}
+              action={
+                <Link href="/insights" className="btn-ghost btn-sm">
+                  <Icon name="arrowUpRight" className="h-3.5 w-3.5 mr-1" />
+                  {t("common.viewInsights")}
+                </Link>
+              }
+            />
+            <CardContent className="pt-0">
+              <TrendChart
+                points={months.map((m) => ({ label: m.label, value: m.total, ym: m.ym }))}
+                forecast={forecast}
+              />
+              {!insights && (
+                <p className="mt-4 text-sm text-center text-muted">{t("dash.add3Months")}</p>
+              )}
+            </CardContent>
+          </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Recent expenses */}
-        <Card className="card-pad card-hover lg:col-span-2">
-          <CardHeader
-            title={t("dash.recentExpenses")}
-            action={
-              <Link href="/expenses" className="btn-ghost btn-sm">
-                {t("common.manage")}
-              </Link>
-            }
-          />
-          {recent.length === 0 ? (
-            <EmptyState title={t("dash.noExpensesYet")} hint={t("dash.noExpensesHint")} />
-          ) : (
-            <ul className="divide-y divide-ink-100 dark:divide-ink-800">
-              {recent.map((x) => (
-                <li key={x.id} className="flex items-center justify-between py-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink-800 dark:text-ink-100">{fmtMoney(x.amount)}</p>
-                    <p className="truncate text-xs text-ink-400 dark:text-ink-500">
-                      {x.category_name ?? t("common.uncategorized")}
-                      {x.description ? ` · ${x.description}` : ""}
-                    </p>
-                  </div>
-                  <span className="ml-3 shrink-0 text-xs text-ink-400 dark:text-ink-500">
-                    {fmtDate(x.expense_date)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+          {/* AI Suggestion Panel */}
+          <AISuggestionPanel householdId={household?.id} onRefresh={loadAll} />
 
-        {/* AI summary */}
-        <Card className="card-pad">
-          <CardHeader title={t("dash.aiSummary")} />
-          {!insights ? (
-            <EmptyState title={t("dash.notEnoughHistory")} hint={t("dash.notEnoughHistoryHint")} />
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-ink-500 dark:text-ink-400">{t("dash.status")}</span>
-                <StatusBadge status={pred?.status} />
-              </div>
-              <p className="text-sm text-ink-700 dark:text-ink-300">{insights.analysis?.message}</p>
-              {insights.savings?.tip && (
-                <div className="flex gap-2.5 rounded-xl border-l-4 border-emerald-500 bg-emerald-50/80 p-3 text-sm text-emerald-800 dark:border-emerald-400 dark:bg-emerald-500/10 dark:text-emerald-300">
-                  <Icon name="bulb" className="h-5 w-5 shrink-0 text-emerald-500 dark:text-emerald-400" />
-                  <span>{insights.savings.tip}</span>
+          {/* AI Financial Coach Chat */}
+          <AIChat householdId={household?.id} />
+
+          {/* Recent expenses */}
+          <Card variant="glass" padding="lg" className="hover:shadow-lg transition-shadow duration-300">
+            <CardHeader
+              title={t("dash.recentExpenses")}
+              action={
+                <Link href="/expenses" className="btn-ghost btn-sm">
+                  <Icon name="arrowUpRight" className="h-3.5 w-3.5 mr-1" />
+                  {t("common.manage")}
+                </Link>
+              }
+            />
+            <CardContent className="pt-0">
+              {recent.length === 0 ? (
+                <EmptyState
+                  title={t("dash.noExpensesYet")}
+                  hint={t("dash.noExpensesHint")}
+                  action={
+                    <Button variant="primary" size="sm" onClick={() => router.push("/expenses")}>
+                      <Icon name="plus" className="h-3.5 w-3.5 mr-1.5" />
+                      {t("dash.addExpense")}
+                    </Button>
+                  }
+                />
+              ) : (
+                <div className="space-y-3">
+                  {recent.map((x) => (
+                    <div
+                      key={x.id}
+                      className="flex items-center justify-between gap-4 rounded-xl p-3 hover:bg-neutral-100/50 dark:hover:bg-ink-800/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="shrink-0 grid h-10 w-10 place-items-center rounded-xl bg-brand-50/80 dark:bg-brand-900/30">
+                          <Icon name="receipt" className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-text">{fmtMoney(x.amount)}</p>
+                          <p className="truncate text-xs text-muted">
+                            {x.category_name ?? t("common.uncategorized")}
+                            {x.description ? ` · ${x.description}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted whitespace-nowrap">
+                        {fmtDate(x.expense_date)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
-              <Link href="/insights" className="btn-primary w-full">
-                {t("dash.seeFullInsights")}
-              </Link>
-            </div>
-          )}
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right column - 4/12 on desktop */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* AI Summary Card */}
+          <Card variant="glass" padding="lg" className="sticky top-24">
+            <CardHeader title={t("dash.aiSummary")} />
+            <CardContent className="pt-0 space-y-4">
+              {!insights ? (
+                <EmptyState
+                  title={t("dash.notEnoughHistory")}
+                  hint={t("dash.notEnoughHistoryHint")}
+                  icon={<Icon name="spark" className="h-6 w-6" />}
+                />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted">{t("dash.status")}</span>
+                    <StatusBadge status={pred?.status} />
+                  </div>
+                  <p className="text-sm text-text">{insights.analysis?.message}</p>
+                  {insights.savings?.tip && (
+                    <div className="rounded-xl border-l-4 border-emerald-500 bg-emerald-50/80 p-3 text-sm text-emerald-800 dark:border-emerald-400 dark:bg-emerald-500/10 dark:text-emerald-300 flex gap-2.5">
+                      <Icon name="bulb" className="h-5 w-5 shrink-0 text-emerald-500 dark:text-emerald-400 mt-0.5" />
+                      <span>{insights.savings.tip}</span>
+                    </div>
+                  )}
+                  <Link href="/insights" className="btn-primary w-full">
+                    <Icon name="arrowUpRight" className="h-3.5 w-3.5 mr-1" />
+                    {t("dash.seeFullInsights")}
+                  </Link>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
+      {/* Members Panel */}
       <div ref={membersRef}>
         <MembersPanel
           members={members}
@@ -264,22 +379,22 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* Goals Card */}
       <GoalsCard goals={goals} canManage={canManage} onAdd={addGoal} busy={busy} />
-
 
       {/* Prediction-based suggestions */}
       {predictionSuggestions.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted">
             {t("dash.suggestions.tip")}
           </h4>
           {predictionSuggestions.map((s: string, i: number) => (
             <div
               key={i}
-              className="flex items-start gap-2.5 rounded-xl bg-brand-50 p-3 text-sm dark:bg-brand-soft/20"
+              className="flex items-start gap-2.5 rounded-xl bg-brand-50/80 p-3 text-sm dark:bg-brand-900/20"
             >
               <Icon name="bulb" className="h-5 w-5 shrink-0 text-brand-500 dark:text-brand-400" />
-              <span className="text-ink-700 dark:text-ink-300">{s}</span>
+              <span className="text-text">{s}</span>
             </div>
           ))}
         </div>
@@ -288,19 +403,16 @@ export default function DashboardPage() {
       {/* Budget alerts */}
       {alerts.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted">
             {t("dash.suggestions.alert")}
           </h4>
           {alerts.map((a, i) => (
             <div
               key={i}
-              className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm dark:bg-amber-500/10"
+              className="flex items-start gap-2.5 rounded-xl bg-amber-50/80 p-3 text-sm dark:bg-amber-500/10"
             >
-              <Icon
-                name="alert"
-                className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-400"
-              />
-              <span className="text-ink-700 dark:text-ink-300">{a.message}</span>
+              <Icon name="alert" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-400" />
+              <span className="text-text">{a.message}</span>
             </div>
           ))}
         </div>
@@ -315,6 +427,8 @@ export default function DashboardPage() {
   );
 }
 
+/* ---------- Sub-components ---------- */
+
 function CreateHousehold({
   busy,
   onCreate,
@@ -326,13 +440,13 @@ function CreateHousehold({
   const toast = useToast();
   return (
     <div className="mx-auto max-w-md">
-      <Card className="card-pad">
-        <div className="mb-4 text-center">
-          <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl brand-gradient text-white shadow-pop">
-            <Icon name="home" className="h-6 w-6" />
-          </span>
-          <h2 className="text-lg font-semibold text-ink-900 dark:text-ink-50">{t("dash.createHousehold")}</h2>
-          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">{t("dash.createHouseholdSub")}</p>
+      <Card variant="glass" padding="lg" className="animate-fade-in-up">
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl brand-gradient text-white shadow-pop">
+            <Icon name="home" className="h-7 w-7" />
+          </div>
+          <h2 className="text-xl font-semibold text-text">{t("dash.createHousehold")}</h2>
+          <p className="mt-2 text-sm text-muted">{t("dash.createHouseholdSub")}</p>
         </div>
         <form
           onSubmit={(e) => {
@@ -340,15 +454,20 @@ function CreateHousehold({
             const name = (new FormData(e.currentTarget).get("name") as string)?.trim();
             if (name) onCreate(name).then(() => toast.success(t("toast.householdCreated")));
           }}
-          className="space-y-3"
+          className="space-y-4"
         >
           <div>
             <label className="label">{t("dash.householdName")}</label>
-            <input name="name" required placeholder={t("dash.householdNamePlaceholder")} className="input" />
+            <Input
+              name="name"
+              required
+              placeholder={t("dash.householdNamePlaceholder")}
+              className="mt-1"
+            />
           </div>
-          <button disabled={busy} className="btn-primary w-full">
+          <Button disabled={busy} className="w-full" size="lg">
             {busy ? t("dash.creating") : t("dash.createHouseholdBtn")}
-          </button>
+          </Button>
         </form>
       </Card>
     </div>
@@ -452,53 +571,74 @@ function MembersPanel({
   }
 
   return (
-    <Card className="card-pad">
+    <Card variant="glass" padding="lg" className="animate-fade-in-up">
       <CardHeader
         title={t("members.title")}
         subtitle={t("members.subtitle")}
         action={
           canManage ? (
-            <span className="badge-brand">{t("members.manageNote")}</span>
+            <Badge tone="brand" className="text-xs">
+              {t("members.manageNote")}
+            </Badge>
           ) : (
-            <span className="badge-neutral">{t("members.readonlyNote")}</span>
+            <Badge tone="neutral" className="text-xs">
+              {t("members.readonlyNote")}
+            </Badge>
           )
         }
       />
-      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+      {error && (
+        <div className="mb-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">
+          {error}
+        </div>
+      )}
 
-      <ul className="divide-y divide-ink-100 dark:divide-ink-800">
+      <ul className="divide-y divide-border" role="list" aria-label={t("members.listLabel")}>
         {members.map((m) => (
-          <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-            <div className="min-w-0">
-              <p className="font-medium text-ink-800 dark:text-ink-100">
-                {m.email}
-                {m.id === currentUserId && (
-                  <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-soft dark:text-brand-200">
-                    {t("members.you")}
-                  </span>
-                )}
-              </p>
-              <p className="text-xs text-ink-400 dark:text-ink-500">{roleText(m.role)}</p>
+          <li
+            key={m.id}
+            className="flex flex-wrap items-center justify-between gap-3 py-3"
+          >
+            <div className="min-w-0 flex items-center gap-3">
+              <div className="shrink-0 grid h-10 w-10 place-items-center rounded-xl bg-brand-50/80 dark:bg-brand-900/30">
+                <span className="font-semibold text-brand-600 dark:text-brand-400 text-sm">
+                  {m.email[0].toUpperCase()}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-medium text-text">{m.email}</p>
+                <p className="truncate text-xs text-muted flex items-center gap-1.5">
+                  {roleText(m.role)}
+                  {m.id === currentUserId && (
+                    <Badge tone="brand" className="text-[10px] py-0">
+                      {t("members.you")}
+                    </Badge>
+                  )}
+                </p>
+              </div>
             </div>
             {canManage && m.role !== "owner" && (
               <div className="flex items-center gap-2">
-                <select
+                <Select
                   value={m.role === "parent" ? "parent" : "child"}
-                  disabled={busy}
                   onChange={(e) => doSetRole(m.id, e.target.value as "parent" | "child")}
-                  className="select w-auto py-1.5 text-xs"
+                  disabled={busy}
+                  className="w-auto py-1.5 text-xs"
+                  options={[
+                    { value: "parent", label: t("members.roleParent") },
+                    { value: "child", label: t("members.roleChild") },
+                  ]}
                   aria-label={t("members.setRole")}
-                >
-                  <option value="parent">{t("members.roleParent")}</option>
-                  <option value="child">{t("members.roleChild")}</option>
-                </select>
-                <button
+                />
+                <Button
+                  variant="danger"
+                  size="sm"
                   onClick={() => doRemove(m.id)}
                   disabled={busy}
-                  className="btn-ghost btn-sm text-red-600 hover:bg-red-50"
+                  className="h-8"
                 >
-                  {t("members.remove")}
-                </button>
+                  <Icon name="trash2" className="h-4 w-4" />
+                </Button>
               </div>
             )}
           </li>
@@ -506,32 +646,33 @@ function MembersPanel({
       </ul>
 
       {canManage && (
-        <form onSubmit={doAdd} className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-100 dark:border-ink-800 pt-4">
-          <div className="flex-1">
+        <form onSubmit={doAdd} className="mt-6 flex flex-wrap items-end gap-3 border-t border-border pt-4">
+          <div className="flex-1 min-w-[160px]">
             <label className="label">{t("members.email")}</label>
-            <input
+            <Input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="member@example.com"
-              className="input"
+              className="mt-1"
               required
             />
           </div>
           <div>
             <label className="label">{t("members.role")}</label>
-            <select
+            <Select
               value={role}
               onChange={(e) => setRole(e.target.value as "parent" | "child")}
-              className="select"
-            >
-              <option value="parent">{t("members.roleParent")}</option>
-              <option value="child">{t("members.roleChild")}</option>
-            </select>
+              className="mt-1 w-32"
+              options={[
+                { value: "parent", label: t("members.roleParent") },
+                { value: "child", label: t("members.roleChild") },
+              ]}
+            />
           </div>
-          <button disabled={busy} className="btn-primary">
+          <Button disabled={busy} size="md">
             {busy ? t("common.loading") : t("members.addBtn")}
-          </button>
+          </Button>
         </form>
       )}
     </Card>
@@ -567,85 +708,102 @@ function GoalsCard({
   }
 
   return (
-    <Card className="card-pad">
+    <Card variant="glass" padding="lg" className="animate-fade-in-up">
       <CardHeader title={t("goals.title")} subtitle={t("goals.subtitle")} />
-      {goals.length === 0 ? (
-        <EmptyState title={t("goals.none")} hint={t("goals.noneHint")} />
-      ) : (
-        <ul className="space-y-4">
-          {goals.map((g) => {
-            const pct =
-              g.target_amount > 0
-                ? Math.min(100, Math.round((g.current_amount / g.target_amount) * 100))
-                : 0;
-            const reached = g.current_amount >= g.target_amount;
-            return (
-              <li key={g.id}>
-                <div className="mb-1 flex items-center justify-between text-sm">
-                  <span className="font-medium text-ink-800 dark:text-ink-100">{g.name}</span>
-                  <span className="text-ink-500 dark:text-ink-400">
-                    {fmtMoney(g.current_amount)} / {fmtMoney(g.target_amount)}
-                  </span>
-                </div>
-                <ProgressBar
-                  value={Number(g.current_amount)}
-                  max={Number(g.target_amount)}
-                  tone={reached ? "emerald" : "brand"}
-                />
-                <p className="mt-1 text-xs text-ink-400 dark:text-ink-500">
-                  {pct}% {reached ? t("goals.reached") : t("goals.ofTarget")}
-                </p>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <CardContent className="pt-0">
+        {goals.length === 0 ? (
+          <EmptyState
+            title={t("goals.none")}
+            hint={t("goals.noneHint")}
+            icon={<Icon name="flag" className="h-6 w-6" />}
+            action={
+              canManage && (
+                <Button variant="primary" size="sm" onClick={() => setName("New Goal")}>
+                  <Icon name="plus" className="h-3.5 w-3.5 mr-1.5" />
+                  {t("goals.addBtn")}
+                </Button>
+              )
+            }
+          />
+        ) : (
+          <ul className="space-y-4" role="list" aria-label={t("goals.listLabel")}>
+            {goals.map((g) => {
+              const pct =
+                g.target_amount > 0
+                  ? Math.min(100, Math.round((g.current_amount / g.target_amount) * 100))
+                  : 0;
+              const reached = g.current_amount >= g.target_amount;
+              return (
+                <li key={g.id}>
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className="font-medium text-text">{g.name}</span>
+                    <span className="text-muted">
+                      {fmtMoney(g.current_amount)} / {fmtMoney(g.target_amount)}
+                    </span>
+                  </div>
+                  <ProgressBar
+                    value={Number(g.current_amount)}
+                    max={Number(g.target_amount)}
+                    tone={reached ? "success" : "brand"}
+                    size="md"
+                    showLabel
+                    labelFormatter={(v) => `${Math.round((v / Number(g.target_amount)) * 100)}%`}
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    {pct}% {reached ? t("goals.reached") : t("goals.ofTarget")}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
-      {canManage && (
-        <form
-          onSubmit={doAdd}
-          className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-100 dark:border-ink-800 pt-4"
-        >
-          <div className="min-w-[140px] flex-1">
-            <label className="label">{t("goals.name")}</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("goals.namePlaceholder")}
-              className="input"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">{t("goals.target")}</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder="0.00"
-              className="input w-32"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">{t("goals.current")}</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-              placeholder="0"
-              className="input w-32"
-            />
-          </div>
-          <button disabled={busy} className="btn-primary">
-            {busy ? t("common.loading") : t("goals.addBtn")}
-          </button>
-        </form>
-      )}
+        {canManage && (
+          <form
+            onSubmit={doAdd}
+            className="mt-6 flex flex-wrap items-end gap-3 border-t border-border pt-4"
+          >
+            <div className="min-w-[140px] flex-1">
+              <label className="label">{t("goals.name")}</label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("goals.namePlaceholder")}
+                className="mt-1"
+                required
+              />
+            </div>
+            <div>
+              <label className="label">{t("goals.target")}</label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder="0.00"
+                className="mt-1 w-28"
+                required
+              />
+            </div>
+            <div>
+              <label className="label">{t("goals.current")}</label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                placeholder="0"
+                className="mt-1 w-28"
+              />
+            </div>
+            <Button disabled={busy} size="md">
+              {busy ? t("common.loading") : t("goals.addBtn")}
+            </Button>
+          </form>
+        )}
+      </CardContent>
     </Card>
   );
 }

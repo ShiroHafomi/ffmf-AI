@@ -807,7 +807,7 @@ def trend_analysis(
 
     Returns a dict with:
       - direction: 'increasing' | 'decreasing' | 'flat'
-      - strength: 'sr"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)"' | 'moderate' | 'weak' (based on R² of the trend)
+      - strength: 'strong' | 'moderate' | 'weak' (based on R² of the trend)
       - acceleration: 'accelerating' | 'decelerating' | 'steady'
       - slope_pct: slope as percentage of the starting value (positive = up)
       - recent_slope_pct: slope over the last 3 months vs. the full period slope
@@ -877,7 +877,7 @@ def trend_analysis(
         acceleration = "steady"
         recent_slope_pct = slope_pct
 
-    # Confidence based on n and R²: high = many points + sr"\b(?:tài\s+chính\s+gì|để\s+nghĩa|nguyên\s+tắc|là\s+gì)\s+(?:là|trong|về)" trend, low = few/noisy.
+    # Confidence based on n and R²: high = many points + strong trend, low = few/noisy.
     if n >= 12 and r2 >= 0.4:
         confidence = "high"
     elif n >= 6 and r2 >= 0.2:

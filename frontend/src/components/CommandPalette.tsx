@@ -119,7 +119,7 @@ export default function CommandPalette() {
     return (
       <>
         {text.slice(0, idx)}
-        <mark className="bg-brand-200 text-brand-900 dark:bg-brand-900/40 dark:text-brand-200 rounded px-0.5">
+        <mark className="bg-brand-soft text-brand-text dark:bg-brand-soft/40 dark:text-brand-text rounded px-0.5">
           {text.slice(idx, idx + query.trim().length)}
         </mark>
         {text.slice(idx + query.trim().length)}
@@ -153,18 +153,18 @@ export default function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/40 p-4 pt-[12vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[70] flex items-start justify-center bg-text/40 p-4 pt-[12vh] backdrop-blur-sm"
       onClick={() => setOpen(false)}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-ink-200 dark:border-ink-700 bg-surface shadow-float fade-in"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-surface shadow-float fade-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={t("cmd.title")}
       >
-        <div className="flex items-center gap-3 border-b border-ink-100 dark:border-ink-800 px-4">
-          <span className="text-ink-500 dark:text-ink-400">
+        <div className="flex items-center gap-3 border-b border-border px-4">
+          <span className="text-text-muted">
             <Icon name="search" className="h-5 w-5" />
           </span>
           <input
@@ -173,16 +173,16 @@ export default function CommandPalette() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder={t("cmd.placeholder")}
-            className="w-full bg-transparent py-3.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 dark:placeholder:text-ink-400 dark:text-ink-900"
+            className="w-full bg-transparent py-3.5 text-sm text-text outline-none placeholder:text-text-muted dark:placeholder:text-text-muted"
           />
-          <kbd className="hidden rounded-md border border-ink-200 px-1.5 py-0.5 text-[10px] font-medium text-ink-500 sm:block dark:border-ink-700 dark:text-ink-400">
+          <kbd className="hidden rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-text-muted sm:block">
             ESC
           </kbd>
         </div>
 
         <div ref={listRef} className="max-h-[50vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-ink-400">{t("cmd.noResults")}</p>
+            <p className="px-3 py-6 text-center text-sm text-text-muted">{t("cmd.noResults")}</p>
           ) : (
             filtered.map((item, i) => (
               <button
@@ -191,16 +191,16 @@ export default function CommandPalette() {
                 onClick={item.run}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                   i === active
-                    ? "bg-brand-50 text-brand-800 dark:bg-brand-soft dark:text-brand-200"
-                    : "text-ink-700 dark:text-ink-200"
+                    ? "bg-brand-soft text-brand-text dark:bg-brand-soft/30 dark:text-brand-text"
+                    : "text-text-secondary"
                 }`}
               >
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-400">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-surface-hover text-text-muted">
                   <Icon name={item.icon} className="h-4 w-4" />
                 </span>
                 <span className="flex-1 font-medium">{highlight(item.label, query)}</span>
                 {i === active && (
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-ink-400">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
                     ↵
                   </span>
                 )}

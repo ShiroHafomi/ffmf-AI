@@ -18,6 +18,8 @@ interface AuthContextValue {
   register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  updateProfile: (data: { name: string; email: string }) => Promise<{ ok: boolean; status: number; data: unknown }>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; status: number; data: unknown }>;
   authFetch: <T = unknown>(
     path: string,
     opts?: { method?: string; body?: unknown },
@@ -117,6 +119,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (r.ok) setUser(r.data.user);
   }
 
+  async function updateProfile(data: { name: string; email: string }) {
+    return authFetch('/api/auth/me', { method: 'PATCH', body: data });
+  }
+
+  async function changePassword(currentPassword: string, newPassword: string) {
+    return authFetch('/api/auth/change-password', { method: 'POST', body: { currentPassword, newPassword } });
+  }
+
   const authFetch = useCallback(
     async function authFetch<T = unknown>(
       path: string,
@@ -150,6 +160,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         register: doRegister,
         logout: doLogout,
         refreshUser,
+        updateProfile,
+        changePassword,
         authFetch,
       }}
     >

@@ -547,3 +547,263 @@ def read_logs(
 
     entries.sort(key=sort_key, reverse=True)
     return entries[: max(1, min(limit, 2000))]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Blocklist — admin-controlled user blocking
+# ══════════════════════════════════════════════════════════════════════════════
+
+def block_user(user_id: int, admin_id: int, reason: Optional[str] = None, connection=None) -> dict:
+    """Block a user from authenticating. Re-activates an existing block if present."""
+    if user_id == admin_id:
+        raise ValueError("cannot block your own account")
+
+    with _db_cursor(connection=connection) as (cursor, conn):
+        # Check user exists and is not the last admin (if an admin is being blocked)
+        cursor.execute(
+            "SELECT id, role_id FROM users WHERE id = %s", (user_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError("user not found")
+
+        if row["role_id"] == 1:
+            cursor.execute("SELECT COUNT(*) AS n FROM users WHERE role_id = 1")
+            admins = cursor.fetchone()["n"]
+            if admins <= 1:
+                raise ValueError("cannot block the last admin")
+
+        # UPSERT: reactivate if already blocked, otherwise insert
+        cursor.execute(
+            """
+            INSERT INTO user_blocklist (user_id, blocked_by, reason, is_active)
+            VALUES (%s, %s, %s, 1)
+            ON DUPLICATE KEY UPDATE
+                blocked_by = VALUES(blocked_by),
+                reason      = VALUES(reason),
+                is_active   = 1,
+                created_at  = CURRENT_TIMESTAMP
+            """,
+            (user_id, admin_id, reason),
+        )
+        conn.commit()
+
+    return {"user_id": user_id, "blocked": True, "reason": reason}
+
+
+def unblock_user(user_id: int, connection=None) -> bool:
+    """Remove a user from the active blocklist. Returns True if deactivated."""
+    with _db_cursor(connection=connection) as (cursor, conn):
+        cursor.execute(
+            "UPDATE user_blocklist SET is_active = 0 WHERE user_id = %s AND is_active = 1",
+            (user_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def list_blocklist(
+    page: int = 1,
+    page_size: int = 50,
+    connection=None,
+) -> dict:
+    """Paginated list of currently blocked users."""
+    page = max(1, int(page))
+    page_size = min(200, max(1, int(page_size)))
+    offset = (page - 1) * page_size
+
+    with _db_cursor(connection=connection) as (cursor, _):
+        cursor.execute(
+            "SELECT COUNT(*) AS n FROM user_blocklist WHERE is_active = 1"
+        )
+        total = cursor.fetchone()["n"]
+
+        cursor.execute(
+            """
+            SELECT bl.id, bl.user_id, bl.blocked_by, bl.reason, bl.created_at,
+                   u.email AS user_email, u.name AS user_name,
+                   a.email AS admin_email, a.name AS admin_name
+            FROM user_blocklist bl
+            JOIN users u  ON u.id  = bl.user_id
+            JOIN users a  ON a.id  = bl.blocked_by
+            WHERE bl.is_active = 1
+            ORDER BY bl.created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (page_size, offset),
+        )
+        rows = cursor.fetchall()
+
+    return {
+        "blocklist": rows,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": (total + page_size - 1) // page_size if total > 0 else 1,
+    }
+
+
+def is_user_blocked(user_id: int, connection=None) -> bool:
+    """Check whether a user is currently blocked. Used by auth middleware."""
+    with _db_cursor(connection=connection) as (cursor, _):
+        cursor.execute(
+            "SELECT 1 FROM user_blocklist WHERE user_id = %s AND is_active = 1",
+            (user_id,),
+        )
+        return cursor.fetchone() is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI Overview — aggregate all AI predictions for a household
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_ai_overview(household_id: int) -> dict:
+    """Run all AI analyses for a household and return a comprehensive overview.
+
+    Mirrors the data flow of routes/insights.py: pulls monthly expense/income/
+    budget/category data, then feeds the *lists* (not household_id) into the
+    AI helpers. Each section is wrapped so a failure in one does not kill the
+    whole response — the failed section just reports its error.
+    """
+    from db.connection import get_connection
+    from services.ai_service import (
+        predict_next_month,
+        detect_anomalies,
+        generate_savings_advice,
+        forecast_category_breakdown,
+    )
+    from services.db_service import (
+        get_monthly_expenses,
+        get_monthly_incomes,
+        get_latest_budget,
+        get_category_expenses,
+        get_monthly_category_expenses,
+        get_household_currency,
+    )
+
+    result: dict = {
+        "household_id": household_id,
+        "has_data": False,
+        "forecast": None,
+        "anomalies": None,
+        "savings": None,
+        "categories": None,
+    }
+
+    conn = None
+    try:
+        conn = get_connection()
+    except Exception as e:
+        result["forecast"] = {"error": f"DB connection failed: {e}"}
+        result["anomalies"] = {"error": "DB connection failed"}
+        result["savings"] = {"error": "DB connection failed"}
+        result["categories"] = {"error": "DB connection failed"}
+        return result
+
+    try:
+        # --- Pull all source data on one connection -------------------------
+        expenses = get_monthly_expenses(household_id, connection=conn)
+        result["has_data"] = bool(expenses)
+        if not expenses:
+            return result
+
+        budget = get_latest_budget(household_id, connection=conn)
+        currency = "VND"
+        try:
+            currency = get_household_currency(household_id, connection=conn)
+        except Exception:
+            pass
+
+        try:
+            category_expenses = get_category_expenses(household_id, connection=conn)
+        except Exception:
+            category_expenses = []
+
+        try:
+            incomes = get_monthly_incomes(household_id, connection=conn)
+        except Exception:
+            incomes = []
+
+        # --- Forecast -----------------------------------------------------
+        try:
+            forecast = predict_next_month(
+                expenses,
+                amount_key="total_expense",
+                category_context=category_expenses,
+                budget=budget,
+                household_id=household_id,
+                target_currency=currency,
+                connection=conn,
+            )
+            predicted = float(forecast.get("predicted") or 0)
+            last_month = float(expenses[-1]["total_expense"])
+
+            # Income forecast (if enough history)
+            predicted_income = None
+            income_res = None
+            if incomes and len(incomes) >= 3:
+                try:
+                    income_res = predict_next_month(
+                        incomes,
+                        amount_key="total_income",
+                        household_id=household_id,
+                        target_currency=currency,
+                        connection=conn,
+                    )
+                    predicted_income = float(income_res.get("predicted") or 0)
+                except Exception:
+                    income_res = None
+
+            result["forecast"] = {
+                "predicted": predicted,
+                "last_month": last_month,
+                "interval": forecast.get("interval"),
+                "confidence": forecast.get("confidence"),
+                "method": forecast.get("method"),
+                "explanation": forecast.get("explanation"),
+                "suggestions": forecast.get("suggestions", []),
+                "currency": currency,
+                "income_predicted": predicted_income,
+                "income_interval": income_res.get("interval") if income_res else None,
+                "income_method": income_res.get("method") if income_res else None,
+            }
+        except Exception as e:
+            result["forecast"] = {"error": str(e)}
+
+        # --- Anomalies ----------------------------------------------------
+        try:
+            anomalies = detect_anomalies(expenses, amount_key="total_expense")
+            result["anomalies"] = {
+                "found": len(anomalies) if isinstance(anomalies, list) else 0,
+                "items": anomalies if isinstance(anomalies, list) else [],
+            }
+        except Exception as e:
+            result["anomalies"] = {"error": str(e)}
+
+        # --- Savings ------------------------------------------------------
+        try:
+            pred_val = None
+            if isinstance(result.get("forecast"), dict) and "predicted" in result["forecast"]:
+                pred_val = result["forecast"]["predicted"]
+            income_val = None
+            if isinstance(result.get("forecast"), dict) and "income_predicted" in result["forecast"]:
+                income_val = result["forecast"]["income_predicted"]
+            savings = generate_savings_advice(pred_val, income_val, budget)
+            result["savings"] = savings if isinstance(savings, dict) else {"advice": str(savings)}
+        except Exception as e:
+            result["savings"] = {"error": str(e)}
+
+        # --- Category breakdown -------------------------------------------
+        try:
+            cat_monthly = get_monthly_category_expenses(household_id, connection=conn)
+            cats = forecast_category_breakdown(cat_monthly)
+            result["categories"] = (
+                cats if isinstance(cats, (dict, list)) else {"breakdown": str(cats)}
+            )
+        except Exception as e:
+            result["categories"] = {"error": str(e)}
+
+        return result
+    finally:
+        if conn is not None and conn.is_connected():
+            conn.close()
