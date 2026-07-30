@@ -5,5 +5,8 @@
     "build": "cd frontend && npm run build",
     "dev": "cd frontend && npm run dev",
     "install": "cd frontend && npm install"
+  },
+  "dependencies": {
+    "next": "16.2.10"
   }
 }
