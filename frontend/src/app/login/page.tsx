@@ -62,66 +62,55 @@ export default function LoginPage() {
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-5" noValidate>
-        <div>
-          <label htmlFor="email" className="label">
-            {t("login.email")}
-          </label>
+      <form onSubmit={onSubmit} className="space-y-6 fade-in-up stagger" noValidate>
+        <Input
+          id="email"
+          type="email"
+          label={t("login.email")}
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (errors.email) setErrors((prev) => ({ ...prev, email: "" }));
+          }}
+          placeholder="you@example.com"
+          autoComplete="email"
+          required
+          aria-describedby={errors.email ? "email-error" : "email-hint"}
+          aria-invalid={errors.email ? "true" : "false"}
+          error={errors.email}
+          hint={t("login.emailHint")}
+          style={{ animationDelay: "0ms" }}
+        />
+
+        <div style={{ animationDelay: "50ms" }}>
           <Input
-            id="email"
-            type="email"
-            required
-            value={email}
+            id="password"
+            type={showPw ? "text" : "password"}
+            label={t("login.password")}
+            value={password}
             onChange={(e) => {
-              setEmail(e.target.value);
-              if (errors.email) setErrors((prev) => ({ ...prev, email: "" }));
+              setPassword(e.target.value);
+              if (errors.password) setErrors((prev) => ({ ...prev, password: "" }));
             }}
-            placeholder="you@example.com"
-            autoComplete="email"
-            aria-describedby={errors.email ? "email-error" : "email-hint"}
-            aria-invalid={errors.email ? "true" : "false"}
-            error={errors.email}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            required
+            className="pr-12"
+            error={errors.password}
+            hint={t("login.passwordHint")}
           />
-          {errors.email && <p id="email-error" className="form-error" role="alert">{errors.email}</p>}
-          <p id="email-hint" className="form-hint">{t("login.emailHint")}</p>
+          <button
+            type="button"
+            onClick={() => setShowPw((s) => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface transition-colors"
+            aria-label={showPw ? t("login.hidePassword") : t("login.showPassword")}
+            aria-pressed={showPw}
+          >
+            <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
+          </button>
         </div>
 
-        <div>
-          <label htmlFor="password" className="label">
-            {t("login.password")}
-          </label>
-          <div className="relative">
-            <Input
-              id="password"
-              type={showPw ? "text" : "password"}
-              required
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                if (errors.password) setErrors((prev) => ({ ...prev, password: "" }));
-              }}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              className="pr-12"
-              aria-describedby={errors.password ? "password-error" : "password-hint"}
-              aria-invalid={errors.password ? "true" : "false"}
-              error={errors.password}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPw((s) => !s)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
-              aria-label={showPw ? t("login.hidePassword") : t("login.showPassword")}
-              aria-pressed={showPw}
-            >
-              <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
-            </button>
-          </div>
-          {errors.password && <p id="password-error" className="form-error" role="alert">{errors.password}</p>}
-          <p id="password-hint" className="form-hint">{t("login.passwordHint")}</p>
-        </div>
-
-        <Button type="submit" disabled={busy} className="w-full" size="lg" isLoading={busy}>
+        <Button type="submit" disabled={busy} className="w-full" size="lg" isLoading={busy} variant="cta">
           {t("login.submit")}
         </Button>
 
@@ -129,8 +118,13 @@ export default function LoginPage() {
           {busy && t("login.submitting")}
         </p>
 
-        <p className="text-center text-xs text-text-faint mt-4">
-          {t("login.forgotPassword")}
+        <p className="text-center text-xs text-text-muted">
+          <Link
+            href="/forgot-password"
+            className="text-brand hover:text-brand-hover dark:text-brand-text dark:hover:text-brand-hover transition-colors"
+          >
+            {t("login.forgotPassword")}
+          </Link>
         </p>
       </form>
     </AuthLayout>

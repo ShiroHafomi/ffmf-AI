@@ -79,3 +79,12 @@ skills-lock.json
 
 # Seed script (test data for specific user)
 /scripts/seed_tranp9436.py
+
+# SQL migration/dump files
+*.sql
+
+# Project SQL init/seed files
+init.sql
+init_complete.sql
+seed_data.sql
+sql_init/

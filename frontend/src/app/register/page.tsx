@@ -59,111 +59,134 @@ export default function RegisterPage() {
       footer={
         <>
           {t("register.hasAccount")}{" "}
-          <Link href="/login" className="font-semibold text-brand hover:text-brand-hover dark:text-brand-text dark:hover:text-brand-text transition-colors">
+          <Link
+            href="/login"
+            className="font-semibold text-brand hover:text-brand-hover dark:text-brand-text dark:hover:text-brand-hover transition-colors"
+          >
             {t("register.signIn")}
           </Link>
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-5" noValidate>
-        <div>
-          <label htmlFor="name" className="label">
-            {t("register.name")}
-          </label>
+      <form onSubmit={onSubmit} className="space-y-6 fade-in-up stagger" noValidate>
+        <div style={{ animationDelay: "0ms" }}>
           <Input
             id="name"
             value={name}
-            onChange={(e) => { setName(e.target.value); if (errors.name) setErrors(prev => ({ ...prev, name: "" })); }}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (errors.name) setErrors((prev) => ({ ...prev, name: "" }));
+            }}
             placeholder={t("register.namePlaceholder")}
             autoComplete="name"
             required
+            label={t("register.name")}
+            error={errors.name}
+            hint={t("register.nameHint")}
             aria-describedby={errors.name ? "name-error" : "name-hint"}
             aria-invalid={errors.name ? "true" : "false"}
-            error={errors.name}
           />
-          {errors.name && <p id="name-error" className="form-error" role="alert">{errors.name}</p>}
-          <p id="name-hint" className="form-hint">{t("register.nameHint")}</p>
         </div>
 
-        <div>
-          <label htmlFor="email" className="label">
-            {t("register.email")}
-          </label>
+        <div style={{ animationDelay: "50ms" }}>
           <Input
             id="email"
             type="email"
             required
             value={email}
-            onChange={(e) => { setEmail(e.target.value); if (errors.email) setErrors(prev => ({ ...prev, email: "" })); }}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (errors.email) setErrors((prev) => ({ ...prev, email: "" }));
+            }}
             placeholder="you@example.com"
             autoComplete="email"
+            label={t("register.email")}
+            error={errors.email}
+            hint={t("register.emailHint")}
             aria-describedby={errors.email ? "email-error" : "email-hint"}
             aria-invalid={errors.email ? "true" : "false"}
-            error={errors.email}
           />
-          {errors.email && <p id="email-error" className="form-error" role="alert">{errors.email}</p>}
-          <p id="email-hint" className="form-hint">{t("register.emailHint")}</p>
         </div>
 
-        <div>
-          <label htmlFor="password" className="label">
-            {t("register.password")}
-          </label>
-          <div className="relative">
-            <Input
-              id="password"
-              type={showPw ? "text" : "password"}
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); if (errors.password) setErrors(prev => ({ ...prev, password: "" })); if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: "" })); }}
-              placeholder={t("register.passwordPlaceholder")}
-              autoComplete="new-password"
-              className="pr-12"
-              aria-describedby={errors.password ? "password-error" : "password-hint"}
-              aria-invalid={errors.password ? "true" : "false"}
-              error={errors.password}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPw(s => !s)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
-              aria-label={showPw ? t("login.hidePassword") : t("login.showPassword")}
-              aria-pressed={showPw}
-            >
-              <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
-            </button>
-          </div>
-          {errors.password && <p id="password-error" className="form-error" role="alert">{errors.password}</p>}
-          <p id="password-hint" className="form-hint">{t("register.passwordHint")}</p>
+        <div style={{ animationDelay: "100ms" }}>
+          <Input
+            id="password"
+            type={showPw ? "text" : "password"}
+            required
+            minLength={6}
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (errors.password) setErrors((prev) => ({ ...prev, password: "" }));
+              if (errors.confirmPassword) setErrors((prev) => ({ ...prev, confirmPassword: "" }));
+            }}
+            placeholder={t("register.passwordPlaceholder")}
+            autoComplete="new-password"
+            className="pr-12"
+            label={t("register.password")}
+            error={errors.password}
+            hint={t("register.passwordHint")}
+            aria-describedby={errors.password ? "password-error" : "password-hint"}
+            aria-invalid={errors.password ? "true" : "false"}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPw((s) => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface transition-colors"
+            aria-label={showPw ? t("login.hidePassword") : t("login.showPassword")}
+            aria-pressed={showPw}
+          >
+            <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
+          </button>
         </div>
 
-        <div>
-          <label htmlFor="confirmPassword" className="label">
-            {t("register.confirmPassword")}
-          </label>
+        <div style={{ animationDelay: "150ms" }}>
           <Input
             id="confirmPassword"
             type={showPw ? "text" : "password"}
             required
             value={confirmPassword}
-            onChange={(e) => { setConfirmPassword(e.target.value); if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: "" })); }}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (errors.confirmPassword) setErrors((prev) => ({ ...prev, confirmPassword: "" }));
+            }}
             placeholder={t("register.confirmPasswordPlaceholder")}
             autoComplete="new-password"
+            className="pr-12"
+            label={t("register.confirmPassword")}
+            error={errors.confirmPassword}
+            hint={t("register.confirmPasswordHint")}
             aria-describedby={errors.confirmPassword ? "confirm-error" : "confirm-hint"}
             aria-invalid={errors.confirmPassword ? "true" : "false"}
-            error={errors.confirmPassword}
           />
-          {errors.confirmPassword && <p id="confirm-error" className="form-error" role="alert">{errors.confirmPassword}</p>}
-          <p id="confirm-hint" className="form-hint">{t("register.confirmPasswordHint")}</p>
+          <button
+            type="button"
+            onClick={() => setShowPw((s) => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface transition-colors"
+            aria-label={showPw ? t("login.hidePassword") : t("login.showPassword")}
+            aria-pressed={showPw}
+          >
+            <Icon name={showPw ? "eyeOff" : "eye"} className="h-5 w-5" />
+          </button>
         </div>
 
-        <Button type="submit" disabled={busy} className="w-full" size="lg" isLoading={busy}>
+        <Button
+          type="submit"
+          disabled={busy}
+          className="w-full"
+          size="lg"
+          isLoading={busy}
+          variant="cta"
+        >
           {t("register.submit")}
         </Button>
 
         <p className="text-center text-sm text-text-muted" aria-live="polite">
           {busy && t("register.submitting")}
+        </p>
+
+        <p className="text-xs text-text-muted text-center" style={{ animationDelay: "200ms" }}>
+          {t("register.termsAgreement")}
         </p>
       </form>
     </AuthLayout>
