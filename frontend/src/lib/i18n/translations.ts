@@ -17,6 +17,8 @@ export const translations: Record<Locale, Dict> = {
   en: {
     /* generic */
     "common.loading": "Loading…",
+    "common.clear": "Clear",
+    "common.dismiss": "Dismiss",
     "common.logout": "Log out",
     "common.noData": "—",
     "common.forecast": "Forecast",
@@ -59,6 +61,11 @@ export const translations: Record<Locale, Dict> = {
     "login.submit": "Sign in",
     "login.submitting": "Signing in…",
     "login.failed": "Login failed",
+    "login.emailHint": "We'll never share your email",
+    "login.passwordHint": "Enter your password to sign in",
+    "login.forgotPassword": "Forgot password?",
+    "login.showPassword": "Show password",
+    "login.hidePassword": "Hide password",
 
     /* register */
     "register.title": "Create account",
@@ -73,6 +80,20 @@ export const translations: Record<Locale, Dict> = {
     "register.submit": "Create account",
     "register.submitting": "Creating…",
     "register.failed": "Registration failed",
+    "register.nameHint": "This is how members will see you",
+    "register.emailHint": "We'll never share your email",
+    "register.passwordHint": "At least 6 characters",
+    "register.confirmPassword": "Confirm password",
+    "register.confirmPasswordPlaceholder": "Retype your password",
+    "register.confirmPasswordHint": "Must match the password above",
+    "register.termsAgreement": "By continuing, you agree to our Terms of Service and Privacy Policy",
+
+    /* validation */
+    "validation.required": "This field is required",
+    "validation.invalidEmail": "Please enter a valid email address",
+    "validation.nameTooShort": "Name must be at least 2 characters",
+    "validation.passwordTooShort": "Password must be at least 6 characters",
+    "validation.passwordsMismatch": "Passwords do not match",
 
     /* dashboard */
     "dash.predictedNextMonth": "Predicted next month",
@@ -84,6 +105,12 @@ export const translations: Record<Locale, Dict> = {
     "dash.remaining": "Remaining",
     "dash.overBudget": "over budget",
     "dash.leftThisMonth": "left this month",
+    "dash.used": "used",
+    "dash.welcome": "Welcome, {name}",
+    "dash.householdDashboard": "{name} Household Dashboard",
+    "dash.onTrack": "On track",
+    "dash.budgetProgress": "Budget progress",
+    "dash.nearLimit": "Near limit",
     "dash.spendingTrend": "Spending trend",
     "dash.spendingTrendSub": "Actual monthly spend with AI forecast for next month",
     "dash.add3Months": "Add at least 3 months of expenses to unlock the AI forecast.",
@@ -451,6 +478,12 @@ export const translations: Record<Locale, Dict> = {
     "settings.dangerZone": "Danger zone",
     "settings.dangerZoneSubtitle": "Irreversible actions",
     "settings.logoutDesc": "Sign out of your account on this device",
+    "settings.householdNamePlaceholder": "e.g. The Smith Family",
+    "settings.profileDesc": "Update your name and email address",
+    "settings.accountDesc": "Change your password to keep your account secure",
+    "settings.appearanceDesc": "Customize how FFMS looks on your device",
+    "settings.languageDetail": "This will change the interface language",
+    "settings.householdDesc": "Manage your household information",
 
     /* search + period */
     "common.search": "Search",
@@ -516,6 +549,8 @@ export const translations: Record<Locale, Dict> = {
   vi: {
     /* generic */
     "common.loading": "Đang tải…",
+    "common.clear": "Xóa",
+    "common.dismiss": "Bỏ qua",
     "common.logout": "Đăng xuất",
     "common.noData": "—",
     "common.forecast": "Dự báo",
@@ -558,6 +593,11 @@ export const translations: Record<Locale, Dict> = {
     "login.submit": "Đăng nhập",
     "login.submitting": "Đang đăng nhập…",
     "login.failed": "Đăng nhập thất bại",
+    "login.emailHint": "Chúng tôi sẽ không chia sẻ email của bạn",
+    "login.passwordHint": "Nhập mật khẩu để đăng nhập",
+    "login.forgotPassword": "Quên mật khẩu?",
+    "login.showPassword": "Hiện mật khẩu",
+    "login.hidePassword": "Ẩn mật khẩu",
 
     /* register */
     "register.title": "Tạo tài khoản",
@@ -572,6 +612,20 @@ export const translations: Record<Locale, Dict> = {
     "register.submit": "Tạo tài khoản",
     "register.submitting": "Đang tạo…",
     "register.failed": "Đăng ký thất bại",
+    "register.nameHint": "Đây là cách thành viên khác sẽ nhìn thấy bạn",
+    "register.emailHint": "Chúng tôi sẽ không chia sẻ email của bạn",
+    "register.passwordHint": "Ít nhất 6 ký tự",
+    "register.confirmPassword": "Xác nhận mật khẩu",
+    "register.confirmPasswordPlaceholder": "Nhập lại mật khẩu",
+    "register.confirmPasswordHint": "Phải khớp với mật khẩu trên",
+    "register.termsAgreement": "Bằng cách tiếp tục, bạn đồng ý với Điều khoản dịch vụ và Chính sách bảo mật của chúng tôi",
+
+    /* validation */
+    "validation.required": "Trường này là bắt buộc",
+    "validation.invalidEmail": "Vui lòng nhập địa chỉ email hợp lệ",
+    "validation.nameTooShort": "Tên phải có ít nhất 2 ký tự",
+    "validation.passwordTooShort": "Mật khẩu phải có ít nhất 6 ký tự",
+    "validation.passwordsMismatch": "Mật khẩu không khớp",
 
     /* dashboard */
     "dash.predictedNextMonth": "Dự báo tháng tới",
@@ -583,6 +637,12 @@ export const translations: Record<Locale, Dict> = {
     "dash.remaining": "Còn lại",
     "dash.overBudget": "vượt ngân sách",
     "dash.leftThisMonth": "còn trong tháng",
+    "dash.used": "đã dùng",
+    "dash.welcome": "Chào {name}",
+    "dash.householdDashboard": "Bảng điều khiển hộ {name}",
+    "dash.onTrack": "Ổn định",
+    "dash.budgetProgress": "Tiến độ ngân sách",
+    "dash.nearLimit": "Gần giới hạn",
     "dash.spendingTrend": "Xu hướng chi tiêu",
     "dash.spendingTrendSub": "Chi tiêu thực tế hàng tháng kèm dự báo AI tháng tới",
     "dash.add3Months": "Thêm ít nhất 3 tháng chi tiêu để mở khóa dự báo AI.",
@@ -944,8 +1004,14 @@ export const translations: Record<Locale, Dict> = {
     "settings.dangerZone": "Vùng nguy hiểm",
     "settings.dangerZoneSubtitle": "Các hành động không thể hoàn tác",
     "settings.logoutDesc": "Đăng xuất khỏi tài khoản trên thiết bị này",
+    "settings.householdNamePlaceholder": "Ví dụ: Gia đình Smith",
+    "settings.profileDesc": "Cập nhật tên và email của bạn",
+    "settings.accountDesc": "Thay đổi mật khẩu để bảo vệ tài khoản",
+    "settings.appearanceDesc": "Tùy chỉnh giao diện FFMS trên thiết bị của bạn",
+    "settings.languageDetail": "Điều này sẽ thay đổi ngôn ngữ giao diện",
+    "settings.householdDesc": "Quản lý thông tin hộ gia đình",
 
-    /* search + period */
+    /* command palette */
     "common.search": "Tìm kiếm",
     "common.searchPlaceholder": "Tìm chi tiêu…",
     "ins.period": "Kỳ",

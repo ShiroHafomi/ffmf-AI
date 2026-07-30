@@ -20,6 +20,7 @@ even when no LLM is configured.
 
 import logging
 import os
+import re
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -29,6 +30,40 @@ logger = logging.getLogger("ffms")
 
 # How many knowledge snippets to retrieve and inject per forecast.
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
+
+# Maximum allowed query length for RAG retrieval (guard against injection/DoS)
+MAX_QUERY_LENGTH = int(os.getenv("RAG_MAX_QUERY_LENGTH", "200"))
+
+# Regex for sanitizing category names - keep only alphanumeric and spaces
+_CATEGORY_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9\s\-_]")
+
+
+def _sanitize_category_name(name: str) -> str:
+    """Sanitize category name for use in RAG query.
+
+    Strips non-alphanumeric characters (except hyphens and underscores),
+    collapses whitespace, and limits length.
+    """
+    if not name:
+        return ""
+    # Remove special characters
+    sanitized = _CATEGORY_SANITIZE_RE.sub(" ", name)
+    # Collapse whitespace and trim
+    sanitized = " ".join(sanitized.split())
+    # Limit length to reasonable value
+    return sanitized[:50]
+
+
+def _sanitize_and_truncate_query(query: str, max_length: int = MAX_QUERY_LENGTH) -> str:
+    """Sanitize and truncate query to prevent injection/DoS."""
+    if not query:
+        return ""
+    # Collapse whitespace
+    query = " ".join(query.split())
+    # Truncate
+    if len(query) > max_length:
+        query = query[:max_length]
+    return query
 
 # ───────────────────────── Knowledge corpus ─────────────────────────
 # Each entry is one self-contained piece of advice. TF-IDF matches on the
@@ -239,6 +274,34 @@ FINANCIAL_KNOWLEDGE_BASE: list[str] = [
     "family size, goals — and your budget should adapt accordingly.",
 ]
 
+
+# ───────────────────────── Query sanitization ─────────────────────────
+# Maximum query length to prevent injection/DoS via oversized queries.
+MAX_QUERY_LENGTH = 200
+
+
+def _sanitize_category_name(name: str) -> str:
+    """Sanitize a category name for safe use in RAG queries.
+
+    Strips non-alphanumeric characters (keeping spaces, hyphens, underscores),
+    limits length, and returns empty string if the result is invalid.
+    """
+    if not name:
+        return ""
+
+    # Keep only alphanumeric, spaces, hyphens, and underscores
+    sanitized = re.sub(r"[^a-zA-Z0-9\s\-_]", "", name)
+    # Collapse multiple spaces
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+    # Limit length
+    if len(sanitized) > 50:
+        sanitized = sanitized[:50]
+    # Must have at least one alphanumeric character
+    if not any(c.isalnum() for c in sanitized):
+        return ""
+    return sanitized
+
+
 # Keywords that, when present in BOTH the query and a snippet, earn a small
 # additive relevance boost. This makes retrieval situation-aware: an overspent
 # "food" category nudges food tips up even when TF-IDF alone is ambiguous.
@@ -368,8 +431,12 @@ def retrieve_knowledge(query: str, top_k: int = RAG_TOP_K) -> list[str]:
     is empty or the query is blank, returns the first ``top_k`` snippets as a
     safe default. Never raises — a retrieval failure must not break the forecast.
     """
+    # Guard: empty query or corpus
     if _VECTORIZER is None or _CORPUS_MATRIX is None or not query.strip():
         return list(FINANCIAL_KNOWLEDGE_BASE[: max(top_k, 0)])
+
+    # Guard: max query length to prevent injection/DoS
+    query = _sanitize_and_truncate_query(query, MAX_QUERY_LENGTH)
 
     k = min(max(top_k, 1), len(FINANCIAL_KNOWLEDGE_BASE))
     try:
@@ -474,6 +541,10 @@ def build_knowledge_query(
             name = (c.get("category_name") or "").strip()
             if not name:
                 continue
+            # Sanitize category name to prevent injection
+            name = _sanitize_category_name(name)
+            if not name:
+                continue
             parts.append(name.lower())
             bud = c.get("budget_amount")
             spent = float(c.get("total", 0))
@@ -488,15 +559,17 @@ def build_knowledge_query(
         # Dominant category (largest spend) is the highest-priority lever.
         try:
             dom = max(category_context, key=lambda c: float(c.get("total", 0)))
-            dn = (dom.get("category_name") or "").strip().lower()
+            dn = (dom.get("category_name") or "").strip()
             if dn:
-                parts.append(f"dominant category {dn}")
-                # If the dominant category is also overspent, add a
-                # stronger signal so specific tips surface.
-                dom_bud = dom.get("budget_amount")
-                dom_spent = float(dom.get("total", 0))
-                if dom_bud and dom_spent > float(dom_bud):
-                    parts.append(f"dominant category {dn} overspent")
+                dn = _sanitize_category_name(dn)
+                if dn:
+                    parts.append(f"dominant category {dn.lower()}")
+                    # If the dominant category is also overspent, add a
+                    # stronger signal so specific tips surface.
+                    dom_bud = dom.get("budget_amount")
+                    dom_spent = float(dom.get("total", 0))
+                    if dom_bud and dom_spent > float(dom_bud):
+                        parts.append(f"dominant category {dn.lower()} overspent")
         except (ValueError, TypeError):
             pass
 

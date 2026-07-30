@@ -125,7 +125,7 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 sm:px-6">
       {/* Welcome header */}
-      <div className="glass-panel rounded-2xl p-4 sm:p-6 animate-fade-in-up">
+      <div className="glass-panel rounded-2xl p-4 sm:p-6 fade-in-up">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-text tracking-tight">
@@ -195,7 +195,7 @@ export default function DashboardPage() {
 
       {/* Budget progress bar */}
       {budget?.total_budget && (
-        <div className="glass-panel rounded-2xl p-4 animate-fade-in-up" style={{ "--staggerIndex": 4 } as React.CSSProperties}>
+        <div className="glass-panel rounded-2xl p-4 fade-in-up" style={{ "--staggerIndex": 4 } as React.CSSProperties}>
           <div className="flex items-center justify-between gap-4 mb-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between text-sm">
@@ -440,7 +440,7 @@ function CreateHousehold({
   const toast = useToast();
   return (
     <div className="mx-auto max-w-md">
-      <Card variant="glass" padding="lg" className="animate-fade-in-up">
+      <Card variant="glass" padding="lg" className="fade-in-up">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl brand-gradient text-white shadow-pop">
             <Icon name="home" className="h-7 w-7" />
@@ -571,7 +571,7 @@ function MembersPanel({
   }
 
   return (
-    <Card variant="glass" padding="lg" className="animate-fade-in-up">
+    <Card variant="glass" padding="lg" className="fade-in-up">
       <CardHeader
         title={t("members.title")}
         subtitle={t("members.subtitle")}
@@ -708,7 +708,7 @@ function GoalsCard({
   }
 
   return (
-    <Card variant="glass" padding="lg" className="animate-fade-in-up">
+    <Card variant="glass" padding="lg" className="fade-in-up">
       <CardHeader title={t("goals.title")} subtitle={t("goals.subtitle")} />
       <CardContent className="pt-0">
         {goals.length === 0 ? (

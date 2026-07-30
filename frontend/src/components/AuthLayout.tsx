@@ -3,26 +3,14 @@
 import { type ReactNode } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { LogoMark, Icon } from "@/components/ui/Icon";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { LogoMark, Icon, type IconName } from "@/components/ui/Icon";
+import { Card, CardContent } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
 
 const FEATURES = [
-  {
-    titleKey: "auth.feature1Title",
-    descKey: "auth.feature1Desc",
-    icon: "target",
-  },
-  {
-    titleKey: "auth.feature2Title",
-    descKey: "auth.feature2Desc",
-    icon: "chart",
-  },
-  {
-    titleKey: "auth.feature3Title",
-    descKey: "auth.feature3Desc",
-    icon: "target",
-  },
+  { titleKey: "auth.feature1Title", descKey: "auth.feature1Desc", icon: "target" as IconName },
+  { titleKey: "auth.feature2Title", descKey: "auth.feature2Desc", icon: "chart" as IconName },
+  { titleKey: "auth.feature3Title", descKey: "auth.feature3Desc", icon: "shield" as IconName },
 ];
 
 export default function AuthLayout({
@@ -37,83 +25,87 @@ export default function AuthLayout({
   footer: ReactNode;
 }) {
   const { t, locale } = useLanguage();
-  const year = new Date().getFullYear();
 
   return (
-    <div className={cn("flex min-h-screen relative overflow-hidden", "bg-bg")}>
-      {/* Animated background */}
-      <div className="fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-        <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-brand/10 blur-3xl animate-blob" />
-        <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] rounded-full bg-cta/10 blur-3xl animate-blob animation-delay-2000" />
-        <div className="absolute top-1/2 left-1/2 w-[500px] h-[500px] rounded-full bg-warning/10 blur-3xl animate-blob animation-delay-4000" />
-        <div className="fixed inset-0 bg-[url('data:image/svg+xml,%3Csvg viewBox=%220 0 40 40%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22%23000000%22 fill-opacity=%220.03%22%3E%3Cpath d=%22M0 20L20 0M20 40L40 20M0 0L40 40%22 stroke-width=%220.5%22/%3E%3C/g%3E%3C/svg%22)'] dark:bg-[url('data:image/svg+xml,%3Csvg viewBox=%220 0 40 40%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22%23ffffff%22 fill-opacity=%220.02%22%3E%3Cpath d=%22M0 20L20 0M20 40L40 20M0 0L40 40%22 stroke-width=%220.5%22/%3E%3C/g%3E%3C/svg%22)']" />
+    <div className={cn("flex min-h-screen relative", "bg-bg")}>
+      {/* Skip link for accessibility */}
+      <a href="#main-content" className="skip-link">
+        {t("common.skipToContent")}
+      </a>
+
+      {/* Animated background blobs */}
+      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none" aria-hidden="true">
+        <div
+          className="absolute top-1/4 left-1/4 w-[400px] h-[400px] rounded-full bg-brand/10 blur-3xl animate-blob"
+          style={{ animationDelay: "0s" }}
+        />
+        <div
+          className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] rounded-full bg-cta/10 blur-3xl animate-blob"
+          style={{ animationDelay: "2s" }}
+        />
+        <div
+          className="absolute top-1/2 left-1/2 w-[500px] h-[500px] rounded-full bg-warning/10 blur-3xl animate-blob"
+          style={{ animationDelay: "4s" }}
+        />
+
+        {/* Grid pattern overlay */}
+        <div
+          className="fixed inset-0 bg-grid-pattern opacity-30 dark:opacity-10"
+          style={{
+            backgroundImage: `linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)`,
+            backgroundSize: "48px 48px",
+          }}
+        />
       </div>
 
-      {/* Hero panel - left side on desktop */}
-      <aside className="hidden lg:flex lg:w-1/2 flex-col justify-between p-10 xl:p-16 relative z-10">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-soft backdrop-blur-sm">
-            <LogoMark className="h-7 w-7 text-brand" />
-          </span>
-          <span className="text-xl font-bold text-text tracking-tight">FFMS</span>
-        </div>
-
-        <div className="flex-1 flex flex-col justify-center max-w-lg">
-          <h1 className="text-4xl font-bold leading-tight tracking-tight text-text xl:text-5xl">
-            {t("auth.heroHeading")}
-          </h1>
-          <p className="mt-4 text-lg text-text-secondary max-w-lg">
-            {t("auth.heroSub")}
-          </p>
-          <ul className="mt-10 space-y-4" role="list" aria-label="Features">
-            {FEATURES.map((f) => (
-              <li key={f.titleKey} className="flex items-start gap-3">
-                <span className="mt-0.5 shrink-0 grid h-8 w-8 place-items-center rounded-xl bg-brand-soft text-brand-text">
-                  <Icon name={f.icon as any} className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-base font-semibold text-text">{t(f.titleKey)}</p>
-                  <p className="mt-0.5 text-sm text-text-muted">{t(f.descKey)}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="flex items-center gap-4 mt-8">
-          <LanguageSwitcher className="shrink-0" />
-          <p className="text-sm text-text-muted">
-            {t("auth.footer", { year })}
-          </p>
-        </div>
-      </aside>
-
-      {/* Form side - centered on mobile, right side on desktop */}
-      <main className="flex w-full flex-1 items-center justify-center p-6 lg:w-1/2 lg:p-10">
+      <main id="main-content" className="flex w-full flex-col items-center justify-center p-4 py-12 md:py-20">
         <div className="w-full max-w-md">
-          {/* Mobile brand header */}
-          <div className="lg:hidden mb-8 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-soft backdrop-blur-sm">
-                <LogoMark className="h-6 w-6 text-brand" />
-              </span>
-              <span className="text-xl font-bold text-text">FFMS</span>
-            </div>
-            <LanguageSwitcher />
+          {/* Logo */}
+          <div className="flex items-center justify-center gap-2 mb-8">
+            <LogoMark className="h-10 w-10 text-brand" aria-hidden="true" />
+            <span className="text-display font-bold text-text">FFMS</span>
           </div>
 
-          <Card variant="glass" padding="lg" className="w-full">
-            <CardHeader>
-              <CardTitle className="text-2xl font-semibold text-text">{title}</CardTitle>
-              <p className="mt-2 text-sm text-text-muted">{subtitle}</p>
-            </CardHeader>
-            <CardContent className="mt-2">
+          {/* Feature highlights on desktop */}
+          <div className="hidden lg:grid grid-cols-3 gap-4 mb-8 text-center">
+            {FEATURES.map((feature, index) => (
+              <div
+                key={feature.icon}
+                className="card card-padded card-hover glass-card p-4 text-center"
+                style={{ animationDelay: `${index * 100}ms` } as React.CSSProperties}
+              >
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-brand-soft text-brand-text">
+                  <Icon name={feature.icon} className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <p className="text-sm font-medium text-text">{t(feature.titleKey)}</p>
+                <p className="text-xs text-text-muted mt-1">{t(feature.descKey)}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Main form card - Glassmorphism */}
+          <Card variant="glass" className="card-hover">
+            <CardContent className="pt-6 pb-8">
+              <header className="text-center mb-8">
+                <h1 className="text-display font-bold text-text mb-2">{title}</h1>
+                <p className="text-text-secondary">{subtitle}</p>
+              </header>
+
               {children}
+
+              <footer className="mt-6 pt-4 border-t border-border/50 text-center">
+                <p className="text-sm text-text-muted">{footer}</p>
+              </footer>
             </CardContent>
-            <div className="mt-6 pt-6 border-t border-border">
-              <p className="text-center text-sm text-text-muted">{footer}</p>
-            </div>
           </Card>
+
+          {/* Footer links */}
+          <div className="mt-6 flex items-center justify-center gap-4 text-sm text-text-muted">
+            <LanguageSwitcher />
+            <div className="flex items-center gap-2">
+              <span className="text-xs">{t("common.copyright", { year: new Date().getFullYear() })}</span>
+            </div>
+          </div>
         </div>
       </main>
     </div>

@@ -78,10 +78,98 @@
   --z-toast: 500;
   --z-tooltip: 600;
 
+  /* ── Semantic color aliases (for Tailwind v4 utility generation) ── */
+  --color-bg: var(--bg);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-text-inverse: var(--text-inverse);
+  --color-muted: var(--text-muted);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-active: var(--brand-active);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-text: var(--brand-text);
+  --color-brand-on: var(--brand-on);
+  --color-cta: var(--cta);
+  --color-cta-hover: var(--cta-hover);
+  --color-cta-active: var(--cta-active);
+  --color-cta-soft: var(--cta-soft);
+  --color-cta-text: var(--cta-text);
+  --color-cta-on: var(--cta-on);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-text: var(--success-text);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-text: var(--warning-text);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-text: var(--danger-text);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-text: var(--info-text);
+  --color-field-bg: var(--field-bg);
+  --color-field-border: var(--field-border);
+  --color-field-border-focus: var(--field-border-focus);
+  --color-placeholder: var(--placeholder);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+
   /* ── Typography: Fira Sans / Fira Code / Fira Mono ─────────── */
   --font-sans: "Fira Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Fira Code", ui-monospace, SFMono-Regular, monospace;
   --font-display: "Fira Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Semantic color aliases (resolve to :root/.dark vars) ───── */
+  --color-bg: var(--bg);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-text-inverse: var(--text-inverse);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-active: var(--brand-active);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-text: var(--brand-text);
+  --color-brand-on: var(--brand-on);
+  --color-cta: var(--cta);
+  --color-cta-hover: var(--cta-hover);
+  --color-cta-active: var(--cta-active);
+  --color-cta-soft: var(--cta-soft);
+  --color-cta-text: var(--cta-text);
+  --color-cta-on: var(--cta-on);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-text: var(--success-text);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-text: var(--warning-text);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-text: var(--danger-text);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-text: var(--info-text);
+  --color-muted: var(--text-muted);
 }
 
 /* ── Font loading ────────────────────────────────────────────── */
@@ -103,6 +191,9 @@
 
 /* ── Semantic variables (Light mode) ──────────────────────────── */
 :root {
+  /* Header height for scroll-padding-top */
+  --header-height: 4rem;
+
   /* Background layers */
   --bg: #f8fafc;
   --bg-secondary: #f1f5f9;
@@ -178,6 +269,9 @@
 
 /* ── Dark mode: Fintech OLED palette ──────────────────────────── */
 .dark {
+  /* Header height for scroll-padding-top */
+  --header-height: 4rem;
+
   /* Ink scale flipped */
   --color-ink-50:  #020617;
   --color-ink-100: #0f172a;
@@ -270,6 +364,11 @@
   body {
     height: 100%;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  html {
+    /* Ensure focus is visible when elements receive focus behind sticky header */
+    scroll-padding-top: calc(var(--header-height, 4rem) + 1rem);
   }
 
   body {

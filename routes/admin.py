@@ -69,6 +69,35 @@ async def require_admin_key(request: Request):
         )
 
 
+# ───────────────────────── Per-household rate limiting ─────────────────────────
+# Simple in-memory token bucket: 10 requests per minute per household_id
+_HOUSEHOLD_RATE_LIMIT = 10
+_HOUSEHOLD_RATE_WINDOW = 60  # seconds
+_household_buckets: dict[int, list[float]] = {}
+
+
+def _check_household_rate_limit(household_id: int) -> tuple[bool, int]:
+    """Check and consume a token from the household's bucket.
+
+    Returns (allowed, retry_after_seconds).
+    """
+    now = time.time()
+    bucket = _household_buckets.get(household_id, [])
+    # Remove expired tokens
+    bucket = [t for t in bucket if now - t < _HOUSEHOLD_RATE_WINDOW]
+
+    if len(bucket) >= _HOUSEHOLD_RATE_LIMIT:
+        # Bucket full - calculate when next token available
+        oldest = bucket[0] if bucket else now
+        retry_after = int(_HOUSEHOLD_RATE_WINDOW - (now - oldest)) + 1
+        return False, max(1, retry_after)
+
+    # Add current request
+    bucket.append(now)
+    _household_buckets[household_id] = bucket
+    return True, 0
+
+
 # Apply admin auth to all routes via dependency
 
 
@@ -489,13 +518,40 @@ def admin_unblock_user(
 def admin_ai_overview(
     request: Request,
     household_id: int,
+    admin_id: Optional[int] = None,
     _: None = Depends(require_admin_key),
 ):
     """Run all AI analyses (forecast, anomalies, savings, categories) for a household."""
     if household_id < 1:
         raise HTTPException(status_code=400, detail="Invalid household_id")
+
+    # Per-household rate limit (10 req/min)
+    allowed, retry_after = _check_household_rate_limit(household_id)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests for this household",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     try:
-        return get_ai_overview(household_id)
+        result = get_ai_overview(household_id)
+        # Log admin access for audit
+        from services.ai_service import log_admin_ai_access
+        log_admin_ai_access(
+            admin_id=admin_id or 0,
+            household_id=household_id,
+            endpoint="ai_overview",
+            status="ok",
+        )
+        return result
     except Exception as e:
+        from services.ai_service import log_admin_ai_access
+        log_admin_ai_access(
+            admin_id=admin_id or 0,
+            household_id=household_id,
+            endpoint="ai_overview",
+            status="error",
+        )
         from services.validation import handle_db_error
         handle_db_error("admin_ai_overview", e)

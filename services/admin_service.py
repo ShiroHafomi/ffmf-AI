@@ -657,7 +657,7 @@ def is_user_blocked(user_id: int, connection=None) -> bool:
 # AI Overview — aggregate all AI predictions for a household
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_ai_overview(household_id: int) -> dict:
+def get_ai_overview(household_id: int, admin_id: int | None = None) -> dict:
     """Run all AI analyses for a household and return a comprehensive overview.
 
     Mirrors the data flow of routes/insights.py: pulls monthly expense/income/
@@ -671,6 +671,7 @@ def get_ai_overview(household_id: int) -> dict:
         detect_anomalies,
         generate_savings_advice,
         forecast_category_breakdown,
+        log_admin_ai_access,
     )
     from services.db_service import (
         get_monthly_expenses,
@@ -691,6 +692,7 @@ def get_ai_overview(household_id: int) -> dict:
     }
 
     conn = None
+    status = "ok"
     try:
         conn = get_connection()
     except Exception as e:
@@ -698,6 +700,8 @@ def get_ai_overview(household_id: int) -> dict:
         result["anomalies"] = {"error": "DB connection failed"}
         result["savings"] = {"error": "DB connection failed"}
         result["categories"] = {"error": "DB connection failed"}
+        if admin_id:
+            log_admin_ai_access(admin_id, household_id, "ai_overview", "error")
         return result
 
     try:
@@ -705,6 +709,8 @@ def get_ai_overview(household_id: int) -> dict:
         expenses = get_monthly_expenses(household_id, connection=conn)
         result["has_data"] = bool(expenses)
         if not expenses:
+            if admin_id:
+                log_admin_ai_access(admin_id, household_id, "ai_overview", "ok")
             return result
 
         budget = get_latest_budget(household_id, connection=conn)
@@ -769,6 +775,7 @@ def get_ai_overview(household_id: int) -> dict:
             }
         except Exception as e:
             result["forecast"] = {"error": str(e)}
+            status = "error"
 
         # --- Anomalies ----------------------------------------------------
         try:
@@ -779,6 +786,7 @@ def get_ai_overview(household_id: int) -> dict:
             }
         except Exception as e:
             result["anomalies"] = {"error": str(e)}
+            status = "error"
 
         # --- Savings ------------------------------------------------------
         try:
@@ -792,6 +800,7 @@ def get_ai_overview(household_id: int) -> dict:
             result["savings"] = savings if isinstance(savings, dict) else {"advice": str(savings)}
         except Exception as e:
             result["savings"] = {"error": str(e)}
+            status = "error"
 
         # --- Category breakdown -------------------------------------------
         try:
@@ -802,7 +811,10 @@ def get_ai_overview(household_id: int) -> dict:
             )
         except Exception as e:
             result["categories"] = {"error": str(e)}
+            status = "error"
 
+        if admin_id:
+            log_admin_ai_access(admin_id, household_id, "ai_overview", status)
         return result
     finally:
         if conn is not None and conn.is_connected():

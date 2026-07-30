@@ -262,6 +262,24 @@ def get_current_month_total_income(
         return float(result["total"]) if result else 0.0
 
 
+def get_all_household_ids(connection=None) -> list[int]:
+    """Get all household IDs that have at least one expense or income record.
+
+    Used by backtest jobs to iterate over households with data.
+    Returns a list of household_id integers.
+    """
+    with _db_cursor(dictionary=True, connection=connection) as (cursor, conn):
+        cursor.execute(
+            """
+            SELECT DISTINCT household_id FROM expenses
+            UNION
+            SELECT DISTINCT household_id FROM incomes
+            """
+        )
+        rows = cursor.fetchall()
+        return [row["household_id"] for row in rows if row["household_id"] is not None]
+
+
 # ───────────────────────── Expense CRUD ─────────────────────────
 def category_belongs_to_household(household_id: int, category_id: int) -> bool:
     """True nếu category_id thuộc về household (dùng cho authz)."""

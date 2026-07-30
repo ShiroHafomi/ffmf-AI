@@ -6,7 +6,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useCan } from "@/lib/permissions";
 import { useToast } from "@/components/feedback/Toast";
 import { PageSkeleton, StatCardSkeleton } from "@/components/feedback/Skeleton";
-import { Card, CardHeader, EmptyState, Icon, Badge, StatCard, TrendArrow, Button } from "@/components/ui";
+import { Card, CardHeader, CardContent, EmptyState, Icon, type IconName, Badge, StatCard, Button, Input, Select, Dropdown } from "@/components/ui";
 import { fmtMoney, fmtNumber, fmtDate } from "@/lib/format";
 
 type AdminHousehold = {
@@ -126,7 +126,7 @@ type AIOverview = {
 
 type TabKey = "overview" | "users" | "add" | "blocklist" | "ai";
 
-const tabs: { key: TabKey; labelKey: string; icon: string }[] = [
+const tabs: { key: TabKey; labelKey: string; icon: IconName }[] = [
   { key: "overview", labelKey: "admin.tabOverview", icon: "chart" },
   { key: "users", labelKey: "admin.tabUsers", icon: "users" },
   { key: "add", labelKey: "admin.tabAddMember", icon: "plus" },
@@ -174,10 +174,6 @@ export default function AdminPage() {
   // Block/unblock confirmation
   const [confirmAction, setConfirmAction] = useState<{ type: "block" | "unblock" | "delete"; user: AdminUser | BlockedUser } | null>(null);
   const [blockReason, setBlockReason] = useState("");
-
-  function getConfirmEmail(user: AdminUser | BlockedUser): string {
-    return "user_email" in user ? user.user_email : user.email;
-  }
 
   // AI data
   const [aiHouseholdId, setAiHouseholdId] = useState("");
@@ -444,6 +440,16 @@ export default function AdminPage() {
     }
   }, [activeTab]);
 
+  // Confirm dialog escape + click-outside
+  useEffect(() => {
+    if (!confirmAction) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") closeConfirm();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [confirmAction, closeConfirm]);
+
   // Filter users on search
   const debouncedSearch = useMemo(() => userSearch.trim().toLowerCase(), [userSearch]);
 
@@ -465,43 +471,54 @@ export default function AdminPage() {
   }
 
   if (loading) {
-    return (
-      <PageSkeleton />
-    );
+    return <PageSkeleton />;
   }
 
-  const th = "py-2 pr-4 text-left text-xs font-medium uppercase tracking-wide text-ink-400 dark:text-ink-500";
+  const th = "py-2 pr-4 text-left text-xs font-medium uppercase tracking-wide text-text-muted";
   const td = "py-2.5 pr-4";
-  const row = "border-b border-ink-100 dark:border-ink-800";
+  const row = "border-b border-border";
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 fade-in-up">
+      {/* Header */}
+      <div>
+        <h1 className="text-display font-bold gradient-text">{t("admin.title")}</h1>
+        <p className="text-muted mt-1">{t("admin.subtitle")}</p>
+      </div>
+
       {error && (
-        <p className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>
+        <Card variant="glass" className="border-l-4 border-l-danger">
+          <CardContent className="flex items-center gap-3 py-3">
+            <Icon name="alert" className="h-5 w-5 text-danger shrink-0" />
+            <p className="text-sm text-text">{error}</p>
+          </CardContent>
+        </Card>
       )}
 
-      <div>
-        <h1 className="text-lg font-semibold text-ink-900 dark:text-ink-50">{t("admin.title")}</h1>
-        <p className="text-sm text-ink-500 dark:text-ink-400">{t("admin.subtitle")}</p>
-      </div>
-
-      {/* Tab Bar */}
-      <div className="flex flex-wrap gap-1 -mb-px border-b border-ink-200 dark:border-ink-700">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-2 py-2 px-3 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
-              activeTab === tab.key
-                ? "border-brand-500 text-brand-600 dark:text-brand-400 bg-brand-50/50 dark:bg-brand-soft/30"
-                : "border-transparent text-ink-500 hover:text-ink-700 dark:text-ink-400 dark:hover:text-ink-200"
-            }`}
-          >
-            <Icon name={tab.icon as any} className="h-4 w-4" />
-            {t(tab.labelKey)}
-          </button>
-        ))}
-      </div>
+      {/* Tab Bar — glass pill */}
+      <Card variant="glass">
+        <CardContent className="!p-1.5">
+          <nav className="flex flex-wrap gap-1 justify-start" role="tablist">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                role="tab"
+                aria-selected={activeTab === tab.key}
+                aria-controls={`panel-${tab.key}`}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? "bg-brand-500/10 text-brand-600 dark:bg-brand-500/20 dark:text-brand-400"
+                    : "text-muted hover:bg-surface-hover hover:text-text"
+                }`}
+              >
+                <Icon name={tab.icon} className="h-4 w-4" />
+                {t(tab.labelKey)}
+              </button>
+            ))}
+          </nav>
+        </CardContent>
+      </Card>
 
       {/* ===================== OVERVIEW ===================== */}
       {activeTab === "overview" && (
@@ -548,50 +565,48 @@ export default function AdminPage() {
 
           {/* Block count + System health */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Card className="card-pad card-hover">
+            <Card variant="glass">
               <CardHeader
                 title={t("admin.blocklistHeading")}
                 icon={<Icon name="alert" />}
                 action={
-                  <span className="badge-warning">
-                    {t("admin.blockCount", { n: blockTotal })}
-                  </span>
+                  <Badge tone="warning" size="sm">{t("admin.blockCount", { n: blockTotal })}</Badge>
                 }
               />
               {blockTotal === 0 ? (
                 <EmptyState icon={<Icon name="check" className="h-6 w-6" />} title={t("admin.noBlocked")} />
               ) : (
-                <p className="text-sm text-ink-600 dark:text-ink-300">
+                <p className="text-sm text-text-secondary">
                   {t("admin.blockCount", { n: blockTotal })}
                 </p>
               )}
             </Card>
 
-            <Card className="card-pad card-hover">
+            <Card variant="glass">
               <CardHeader title={t("admin.health")} icon={<Icon name="chart" />} />
               {health && (
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <p className="font-medium text-ink-500 dark:text-ink-400">{t("admin.status")}</p>
-                    <p className={`font-semibold ${health.status === "ok" ? "text-emerald-600" : "text-amber-600"}`}>
+                    <p className="font-medium text-text-muted">{t("admin.status")}</p>
+                    <p className={`font-semibold ${health.status === "ok" ? "text-success-text" : "text-warning-text"}`}>
                       {health.status === "ok" ? t("admin.healthy") : t("admin.unhealthy")}
                     </p>
                   </div>
                   <div>
-                    <p className="font-medium text-ink-500 dark:text-ink-400">{t("admin.uptime")}</p>
-                    <p className="font-semibold text-ink-800 dark:text-ink-100">
+                    <p className="font-medium text-text-muted">{t("admin.uptime")}</p>
+                    <p className="font-semibold text-text">
                       {Math.floor(health.uptime_seconds / 3600)}h {Math.floor((health.uptime_seconds % 3600) / 60)}m
                     </p>
                   </div>
                   <div>
-                    <p className="font-medium text-ink-500 dark:text-ink-400">{t("admin.dbPool")}</p>
-                    <p className="font-semibold text-ink-800 dark:text-ink-100">
+                    <p className="font-medium text-text-muted">{t("admin.dbPool")}</p>
+                    <p className="font-semibold text-text">
                       {t("admin.activeShort")}: {health.database.active_connections} / {t("admin.idleShort")}: {health.database.idle_connections}
                     </p>
                   </div>
                   <div>
-                    <p className="font-medium text-ink-500 dark:text-ink-400">{t("admin.rateLimit")}</p>
-                    <p className="font-semibold text-ink-800 dark:text-ink-100">
+                    <p className="font-medium text-text-muted">{t("admin.rateLimit")}</p>
+                    <p className="font-semibold text-text">
                       {health.rate_limit_per_minute} {t("admin.perMinute")}
                     </p>
                   </div>
@@ -604,20 +619,20 @@ export default function AdminPage() {
 
       {/* ===================== USERS ===================== */}
       {activeTab === "users" && (
-        <Card className="card-pad card-hover">
+        <Card className="card-hover card-padded">
           <CardHeader
             title={t("admin.users")}
             icon={<Icon name="users" />}
             action={
               <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 dark:text-ink-400">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">
                   <Icon name="search" className="h-4 w-4" />
                 </span>
                 <input
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   placeholder={t("admin.search")}
-                  className="input w-44 py-1.5 pl-9 text-xs placeholder:text-ink-500 dark:placeholder:text-ink-400"
+                  className="input w-44 py-1.5 pl-9 text-xs placeholder:text-text-muted"
                 />
               </div>
             }
@@ -638,56 +653,64 @@ export default function AdminPage() {
                     <th className={`${th} text-right`}>{t("admin.actions")}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                <tbody className="divide-y divide-border">
                   {filteredUsers.map((u) => (
                     <tr key={u.id}>
-                      <td className={`${td} text-ink-500 dark:text-ink-400`}>{u.id}</td>
+                      <td className={`${td} text-text-muted`}>{u.id}</td>
                       <td className={td}>
-                        <span className="font-medium text-ink-800 dark:text-ink-100">{u.email}</span>
+                        <span className="font-medium text-text">{u.email}</span>
                         {u.id === user?.id && (
-                          <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-soft dark:text-brand-200">
-                            {t("members.you")}
-                          </span>
+                          <Badge tone="brand" size="sm" className="ml-2">{t("members.you")}</Badge>
                         )}
                       </td>
-                      <td className={`${td} text-ink-600 dark:text-ink-300`}>{u.name ?? "—"}</td>
+                      <td className={`${td} text-text-secondary`}>{u.name ?? "—"}</td>
                       <td className={td}>
                         <Badge tone={u.role_id === 1 ? "brand" : "neutral"}>
                           {u.role_id === 1 ? t("role.admin") : t("role.member")}
                         </Badge>
                       </td>
-                      <td className={`${td} text-ink-600 dark:text-ink-300`}>{u.household_id ?? "—"}</td>
-                      <td className={`${td} text-ink-600 dark:text-ink-300`}>{u.created_at ? fmtDate(u.created_at) : "—"}</td>
+                      <td className={`${td} text-text-secondary`}>{u.household_id ?? "—"}</td>
+                      <td className={`${td} text-text-secondary`}>{u.created_at ? fmtDate(u.created_at) : "—"}</td>
                       <td className={`${td} text-right`}>
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Role toggle */}
-                          <button
-                            disabled={busy || u.id === user?.id}
-                            onClick={() => handleChangeRole(u.id, u.role_id === 1 ? 3 : 1)}
-                            className="btn-ghost btn-sm"
-                            title={t("admin.changeRole")}
-                          >
-                            {u.role_id === 1 ? t("admin.makeMember") : t("admin.makeAdmin")}
-                          </button>
-                          {/* Block */}
-                          <button
-                            disabled={busy || u.id === user?.id}
-                            onClick={() => openConfirm("block", u)}
-                            className="btn-ghost btn-sm text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-soft/30"
-                            title={t("admin.block")}
-                          >
-                            {t("admin.block")}
-                          </button>
-                          {/* Delete */}
-                          <button
-                            disabled={busy || u.id === user?.id}
-                            onClick={() => openConfirm("delete", u)}
-                            className="btn-ghost btn-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-soft/30"
-                            title={t("admin.delete")}
-                          >
-                            {t("admin.delete")}
-                          </button>
-                        </div>
+                        <Dropdown
+                          items={[
+                            {
+                              label: u.role_id === 1 ? t("admin.makeMember") : t("admin.makeAdmin"),
+                              onClick: () => handleChangeRole(u.id, u.role_id === 1 ? 3 : 1),
+                              icon: "cog",
+                              disabled: busy || u.id === user?.id,
+                            },
+                            {
+                              label: t("admin.block"),
+                              onClick: () => openConfirm("block", u),
+                              icon: "alert",
+                              disabled: busy || u.id === user?.id,
+                            },
+                            {
+                              label: t("admin.delete"),
+                              onClick: () => openConfirm("delete", u),
+                              icon: "trash2",
+                              variant: "danger",
+                              disabled: busy || u.id === user?.id,
+                            },
+                          ]}
+                          trigger={({ open, onClick }) => (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={onClick}
+                              aria-expanded={open}
+                              aria-haspopup="menu"
+                              className="min-h-[44px] min-w-[44px]"
+                              disabled={busy || u.id === user?.id}
+                              title={t("admin.actions")}
+                              aria-label={t("admin.actions")}
+                            >
+                              <Icon name="menu" className="h-5 w-5" />
+                            </Button>
+                          )}
+                          align="right"
+                        />
                       </td>
                     </tr>
                   ))}
@@ -699,24 +722,26 @@ export default function AdminPage() {
           {/* Pagination */}
           {userTotalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-sm text-ink-500 dark:text-ink-400">
+              <span className="text-sm text-text-muted">
                 {t("admin.page", { current: userPage, total: userTotalPages })}
               </span>
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={userPage <= 1 || busy}
                   onClick={() => loadUsers(userPage - 1)}
-                  className="btn-ghost btn-sm"
                 >
                   {t("admin.prev")}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={userPage >= userTotalPages || busy}
                   onClick={() => loadUsers(userPage + 1)}
-                  className="btn-ghost btn-sm"
                 >
                   {t("admin.next")}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -727,100 +752,77 @@ export default function AdminPage() {
       {activeTab === "add" && (
         <div className="space-y-6">
           {/* Create user form */}
-          <Card className="card-pad card-hover">
+          <Card variant="glass">
             <CardHeader title={t("admin.createUser")} icon={<Icon name="plus" />} />
+            <CardContent>
             <form onSubmit={handleCreateUser} className="space-y-4 max-w-md">
-              <div>
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.email")}
-                </label>
-                <input
-                  type="email"
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                  required
-                  className="input w-full"
-                  placeholder="user@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.name")}
-                </label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  className="input w-full"
-                  placeholder={t("admin.name")}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.password")}
-                </label>
-                <input
-                  type="password"
-                  value={formPassword}
-                  onChange={(e) => setFormPassword(e.target.value)}
-                  className="input w-full"
-                  placeholder={t("admin.passwordHint")}
-                />
-                <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">{t("admin.passwordHint")}</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.role")}
-                </label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(Number(e.target.value))}
-                  className="input w-full"
-                >
-                  <option value={3}>{t("admin.roleMember")}</option>
-                  <option value={1}>{t("admin.roleAdmin")}</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.householdId")}
-                </label>
-                <input
-                  type="number"
-                  value={formHouseholdId}
-                  onChange={(e) => setFormHouseholdId(e.target.value)}
-                  className="input w-full"
-                  placeholder={t("admin.householdIdHint")}
-                  min="1"
-                />
-                <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">{t("admin.householdIdHint")}</p>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Button type="submit" disabled={busy || !formEmail.trim()}>
-                  {busy ? t("admin.aiRunning") : t("admin.createUser")}
+              <Input
+                type="email"
+                label={t("admin.email")}
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+                required
+                placeholder="user@example.com"
+              />
+              <Input
+                label={t("admin.name")}
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder={t("admin.name")}
+              />
+              <Input
+                type="password"
+                label={t("admin.password")}
+                value={formPassword}
+                onChange={(e) => setFormPassword(e.target.value)}
+                placeholder={t("admin.passwordHint")}
+                hint={t("admin.passwordHint")}
+              />
+              <Select
+                label={t("admin.role")}
+                value={String(formRole)}
+                onChange={(e) => setFormRole(Number(e.target.value))}
+                options={[
+                  { value: "3", label: t("admin.roleMember") },
+                  { value: "1", label: t("admin.roleAdmin") },
+                ]}
+              />
+              <Input
+                type="number"
+                label={t("admin.householdId")}
+                value={formHouseholdId}
+                onChange={(e) => setFormHouseholdId(e.target.value)}
+                placeholder={t("admin.householdIdHint")}
+                hint={t("admin.householdIdHint")}
+                min="1"
+              />
+              <div className="pt-2">
+                <Button type="submit" isLoading={busy} disabled={!formEmail.trim()}>
+                  {t("admin.createUser")}
                 </Button>
               </div>
             </form>
 
             {/* Created user result with password */}
             {createdUser && (
-              <div className="mt-4 rounded-xl bg-emerald-50 p-4 border border-emerald-200 dark:bg-emerald-soft/30 dark:border-emerald-800">
-                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+              <div className="mt-4 rounded-xl bg-success-soft p-4 border border-success/30 dark:bg-success-soft/30 dark:border-success/30">
+                <p className="text-sm font-medium text-success-text">
                   {t("admin.userCreated")}
                 </p>
-                <p className="mt-2 text-sm text-ink-700 dark:text-ink-200">
-                  <span className="font-mono bg-white dark:bg-ink-900 px-2 py-0.5 rounded">{createdUser.password}</span>
-                  <span className="ml-2 text-ink-500 dark:text-ink-400">({t("admin.passwordHint")})</span>
+                <p className="mt-2 text-sm text-text-secondary">
+                  <span className="font-mono bg-surface px-2 py-0.5 rounded">{createdUser.password}</span>
+                  <span className="ml-2 text-text-muted">({t("admin.passwordHint")})</span>
                 </p>
               </div>
             )}
-          </Card>
-        </div>
+          </CardContent>
+        </Card>
+      </div>
       )}
 
       {/* ===================== BLOCKLIST ===================== */}
       {activeTab === "blocklist" && (
-        <Card className="card-pad card-hover">
+        <Card variant="glass">
           <CardHeader title={t("admin.blocklistHeading")} icon={<Icon name="alert" />} />
           {blocklist.length === 0 ? (
             <EmptyState icon={<Icon name="check" className="h-6 w-6" />} title={t("admin.noBlocked")} />
@@ -836,31 +838,33 @@ export default function AdminPage() {
                     <th className={`${th} text-right`}>{t("admin.actions")}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                <tbody className="divide-y divide-border">
                   {blocklist.map((b) => (
                     <tr key={b.id}>
                       <td className={td}>
-                        <span className="font-medium text-ink-800 dark:text-ink-100">{b.user_email}</span>
-                        <p className="text-xs text-ink-500 dark:text-ink-400">{b.user_name ?? "—"}</p>
+                        <span className="font-medium text-text">{b.user_email}</span>
+                        <p className="text-xs text-text-muted">{b.user_name ?? "—"}</p>
                       </td>
                       <td className={td}>
-                        <p className="text-ink-600 dark:text-ink-300">{b.admin_email}</p>
-                        <p className="text-xs text-ink-500 dark:text-ink-400">{b.admin_name ?? "—"}</p>
+                        <p className="text-text-secondary">{b.admin_email}</p>
+                        <p className="text-xs text-text-muted">{b.admin_name ?? "—"}</p>
                       </td>
                       <td className={td}>
-                        <span className={b.reason ? "text-ink-600 dark:text-ink-300" : "text-ink-400 dark:text-ink-500"}>
+                        <span className={b.reason ? "text-text-secondary" : "text-text-muted"}>
                           {b.reason ?? t("admin.noBlocked")}
                         </span>
                       </td>
-                      <td className={`${td} text-ink-600 dark:text-ink-300`}>{fmtDate(b.created_at)}</td>
+                      <td className={`${td} text-text-secondary`}>{fmtDate(b.created_at)}</td>
                       <td className={`${td} text-right`}>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           disabled={busy}
                           onClick={() => handleUnblockUser(b.user_id)}
-                          className="btn-ghost btn-sm text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-soft/30"
+                          className="text-success"
                         >
                           {t("admin.unblock")}
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -872,24 +876,26 @@ export default function AdminPage() {
           {/* Pagination */}
           {blockTotalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
-              <span className="text-sm text-ink-500 dark:text-ink-400">
+              <span className="text-sm text-text-muted">
                 {t("admin.page", { current: blockPage, total: blockTotalPages })}
               </span>
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={blockPage <= 1 || busy}
                   onClick={() => loadBlocklist(blockPage - 1)}
-                  className="btn-ghost btn-sm"
                 >
                   {t("admin.prev")}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={blockPage >= blockTotalPages || busy}
                   onClick={() => loadBlocklist(blockPage + 1)}
-                  className="btn-ghost btn-sm"
                 >
                   {t("admin.next")}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -900,27 +906,26 @@ export default function AdminPage() {
       {activeTab === "ai" && (
         <div className="space-y-6">
           {/* Input card */}
-          <Card className="card-pad card-hover">
+          <Card variant="glass">
             <CardHeader title={t("admin.tabAiData")} icon={<Icon name="bulb" />} />
-            <p className="text-sm text-ink-500 dark:text-ink-400 mb-4">{t("admin.aiDataHint")}</p>
+            <CardContent>
+            <p className="text-sm text-muted mb-4">{t("admin.aiDataHint")}</p>
             <div className="flex flex-wrap gap-3 items-end">
               <div className="flex-1 min-w-[200px]">
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.aiHouseholdLabel")}
-                </label>
-                <input
+                <Input
                   type="number"
+                  label={t("admin.aiHouseholdLabel")}
                   value={aiHouseholdId}
                   onChange={(e) => setAiHouseholdId(e.target.value)}
-                  className="input w-full"
                   placeholder="1"
                   min="1"
                 />
               </div>
-              <Button onClick={runAIOverview} disabled={aiLoading || !aiHouseholdId.trim()}>
-                {aiLoading ? t("admin.aiRunning") : t("admin.aiRun")}
+              <Button onClick={runAIOverview} isLoading={aiLoading} disabled={!aiHouseholdId.trim()}>
+                {t("admin.aiRun")}
               </Button>
             </div>
+          </CardContent>
           </Card>
 
           {/* Results */}
@@ -928,7 +933,7 @@ export default function AdminPage() {
             <div className="space-y-6">
               {/* Forecast card */}
               {aiData.forecast && !("error" in aiData.forecast) && (
-                <Card className="card-pad card-hover border-l-4 border-l-brand-500">
+                <Card className="card-hover card-padded border-l-4 border-l-brand">
                   <CardHeader
                     title={t("admin.forecast")}
                     action={
@@ -936,7 +941,7 @@ export default function AdminPage() {
                         <Badge tone="neutral">{aiData.forecast.method ?? "—"}</Badge>
                         {aiData.forecast.confidence && (
                           <Badge tone="neutral">
-                            {t("admin.forecastConfidence", { value: aiData.forecast.confidence })}
+                            Conf: {aiData.forecast.confidence}
                           </Badge>
                         )}
                       </div>
@@ -945,35 +950,35 @@ export default function AdminPage() {
                   <div className="grid grid-cols-2 gap-4 text-center">
                     <div>
                       <p className="text-2xl font-bold gradient-text">{fmtMoney(aiData.forecast.predicted, aiData.forecast.currency)}</p>
-                      <p className="text-xs text-ink-500 dark:text-ink-400">{t("admin.forecastPredicted")}</p>
+                      <p className="text-xs text-text-muted">{t("admin.forecastPredicted")}</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-ink-800 dark:text-ink-100">{fmtMoney(aiData.forecast.last_month, aiData.forecast.currency)}</p>
-                      <p className="text-xs text-ink-500 dark:text-ink-400">{t("ins.lastMonth")}</p>
+                      <p className="text-2xl font-bold text-text">{fmtMoney(aiData.forecast.last_month, aiData.forecast.currency)}</p>
+                      <p className="text-xs text-text-muted">{t("ins.lastMonth")}</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-ink-800 dark:text-ink-100">
+                      <p className="text-2xl font-bold text-text">
                         {aiData.forecast.income_predicted != null ? fmtMoney(aiData.forecast.income_predicted, aiData.forecast.currency) : "—"}
                       </p>
-                      <p className="text-xs text-ink-500 dark:text-ink-400">{t("ins.incomeForecast")}</p>
+                      <p className="text-xs text-text-muted">{t("ins.incomeForecast")}</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-ink-800 dark:text-ink-100">
+                      <p className="text-2xl font-bold text-text">
                         {aiData.forecast.interval
                           ? `${fmtMoney(aiData.forecast.interval[0])} – ${fmtMoney(aiData.forecast.interval[1])}`
                           : "—"}
                       </p>
-                      <p className="text-xs text-ink-500 dark:text-ink-400">{t("admin.forecastInterval")}</p>
+                      <p className="text-xs text-text-muted">{t("admin.forecastInterval")}</p>
                     </div>
                   </div>
                   {aiData.forecast.explanation && (
-                    <p className="mt-3 text-sm text-ink-700 dark:text-ink-300">{aiData.forecast.explanation}</p>
+                    <p className="mt-3 text-sm text-text-secondary">{aiData.forecast.explanation}</p>
                   )}
                   {aiData.forecast.suggestions && aiData.forecast.suggestions.length > 0 && (
                     <ul className="mt-3 space-y-1.5">
                       {aiData.forecast.suggestions.map((s, i) => (
-                        <li key={i} className="flex gap-2 text-sm text-ink-600 dark:text-ink-300">
-                          <span className="mt-0.5 text-brand-500">•</span>
+                        <li key={i} className="flex gap-2 text-sm text-text-secondary">
+                          <span className="mt-0.5 text-brand">•</span>
                           <span>{s}</span>
                         </li>
                       ))}
@@ -984,7 +989,7 @@ export default function AdminPage() {
 
               {/* Anomalies */}
               {aiData.anomalies && !("error" in aiData.anomalies) && (
-                <Card className="card-pad card-hover border-l-4 border-l-amber-500">
+                <Card variant="glass" className="border-l-4 border-l-warning">
                   <CardHeader
                     title={t("admin.anomalies")}
                     subtitle={t("admin.anomaliesFound", { n: aiData.anomalies.found })}
@@ -996,11 +1001,15 @@ export default function AdminPage() {
                       {aiData.anomalies.items.map((a, i) => (
                         <div
                           key={i}
-                          className={`flex items-center justify-between p-3 rounded-lg ${a.direction === "high" ? "bg-red-50 dark:bg-red-soft/30" : "bg-amber-50 dark:bg-amber-soft/30"}`}
+                          className={`flex items-center justify-between p-3 rounded-lg ${
+                            a.direction === "high"
+                              ? "bg-danger-soft dark:bg-danger-soft/30"
+                              : "bg-warning-soft dark:bg-warning-soft/30"
+                          }`}
                         >
                           <div>
-                            <p className="font-medium text-ink-800 dark:text-ink-100">{a.month}</p>
-                            <p className="text-sm text-ink-500 dark:text-ink-400">
+                            <p className="font-medium text-text">{a.month}</p>
+                            <p className="text-sm text-text-muted">
                               {t("admin.forecastPredicted")}: {fmtMoney(a.amount)} | {t("admin.forecastMethod")}: {fmtMoney(a.median)} | {a.deviation_percent > 0 ? "+" : ""}{a.deviation_percent}%
                             </p>
                           </div>
@@ -1016,18 +1025,18 @@ export default function AdminPage() {
 
               {/* Savings */}
               {aiData.savings && !("error" in aiData.savings) && aiData.savings !== null && (
-                <Card className="card-pad card-hover border-l-4 border-l-emerald-500">
+                <Card variant="glass" className="border-l-4 border-l-success">
                   <CardHeader title={t("admin.savings")} icon={<Icon name="target" />} />
                   <div className="space-y-2">
                     {aiData.savings.surplus != null && (
                       <div className="flex items-center justify-between">
-                        <span className="text-ink-600 dark:text-ink-300">{t("ins.surplus")}</span>
-                        <span className={`text-xl font-bold ${aiData.savings.surplus >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                        <span className="text-text-secondary">{t("ins.surplus")}</span>
+                        <span className={`text-xl font-bold ${aiData.savings.surplus >= 0 ? "text-success-text" : "text-danger-text"}`}>
                           {fmtMoney(aiData.savings.surplus)}
                         </span>
                       </div>
                     )}
-                    <p className="text-sm text-ink-700 dark:text-ink-300">{aiData.savings.tip}</p>
+                    <p className="text-sm text-text-secondary">{aiData.savings.tip}</p>
                     <Badge tone={aiData.savings.status === "surplus" ? "success" : aiData.savings.status === "over_budget" ? "danger" : "neutral"}>
                       {t(`status.${aiData.savings.status}`)}
                     </Badge>
@@ -1037,17 +1046,17 @@ export default function AdminPage() {
 
               {/* Category breakdown */}
               {aiData.categories && Array.isArray(aiData.categories) && aiData.categories.length > 0 && (
-                <Card className="card-pad card-hover">
+                <Card variant="glass">
                   <CardHeader title={t("admin.categoriesBreakdown")} icon={<Icon name="chart" />} />
                   <div className="space-y-2">
                     {aiData.categories.map((c, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-ink-50 dark:bg-ink-800/50">
+                      <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-surface-hover">
                         <div className="flex items-center gap-3">
-                          <span className="text-ink-500 dark:text-ink-400">{i + 1}.</span>
-                          <span className="font-medium text-ink-800 dark:text-ink-100">{c.category}</span>
+                          <span className="text-text-muted">{i + 1}.</span>
+                          <span className="font-medium text-text">{c.category}</span>
                           <Badge tone="neutral">{c.method}</Badge>
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-ink-600 dark:text-ink-300">
+                        <div className="flex items-center gap-4 text-sm text-text-secondary">
                           <span>{t("admin.forecastPredicted")}: {fmtMoney(c.predicted)}</span>
                           <span>{t("admin.forecastTrend")}: {c.trend}</span>
                         </div>
@@ -1059,27 +1068,27 @@ export default function AdminPage() {
 
               {/* Error states */}
               {aiData.forecast && "error" in aiData.forecast && (
-                <Card className="card-pad border-l-4 border-l-red-500">
+                <Card className="card-padded border-l-4 border-l-danger">
                   <CardHeader title={t("admin.forecast")} />
-                  <p className="text-sm text-red-600">{aiData.forecast.error}</p>
+                  <p className="text-sm text-danger-text">{aiData.forecast.error}</p>
                 </Card>
               )}
               {aiData.anomalies && "error" in aiData.anomalies && (
-                <Card className="card-pad border-l-4 border-l-red-500">
+                <Card className="card-padded border-l-4 border-l-danger">
                   <CardHeader title={t("admin.anomalies")} />
-                  <p className="text-sm text-red-600">{aiData.anomalies.error}</p>
+                  <p className="text-sm text-danger-text">{aiData.anomalies.error}</p>
                 </Card>
               )}
               {aiData.savings && "error" in aiData.savings && (
-                <Card className="card-pad border-l-4 border-l-red-500">
+                <Card className="card-padded border-l-4 border-l-danger">
                   <CardHeader title={t("admin.savings")} />
-                  <p className="text-sm text-red-600">{aiData.savings.error}</p>
+                  <p className="text-sm text-danger-text">{aiData.savings.error}</p>
                 </Card>
               )}
               {aiData.categories && "error" in aiData.categories && (
-                <Card className="card-pad border-l-4 border-l-red-500">
+                <Card className="card-padded border-l-4 border-l-danger">
                   <CardHeader title={t("admin.categoriesBreakdown")} />
-                  <p className="text-sm text-red-600">{aiData.categories.error}</p>
+                  <p className="text-sm text-danger-text">{aiData.categories.error}</p>
                 </Card>
               )}
 
@@ -1096,12 +1105,26 @@ export default function AdminPage() {
 
       {/* Confirmation dialog (inline) */}
       {confirmAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-surface p-6 shadow-float fade-in-up">
-            <h3 className="text-lg font-semibold text-ink-900 dark:text-ink-50">
-              {confirmAction.type === "block" ? t("admin.confirmBlock") : confirmAction.type === "unblock" ? t("admin.confirmUnblock") : t("admin.confirmDeleteUser", { name: getConfirmEmail(confirmAction.user) })}
+        <div
+          className="fixed inset-0 z-modal flex items-center justify-center bg-text/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-title"
+          onClick={closeConfirm}
+        >
+          <div
+            id="confirm-dialog"
+            className="w-full max-w-md glass-panel rounded-2xl shadow-float fade-in-up p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="confirm-title" className="text-lg font-semibold text-text">
+              {confirmAction.type === "block"
+                ? t("admin.confirmBlock")
+                : confirmAction.type === "unblock"
+                ? t("admin.confirmUnblock")
+                : t("admin.confirmDeleteUser", { name: getConfirmEmail(confirmAction.user) })}
             </h3>
-            <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
+            <p className="mt-2 text-sm text-text-secondary">
               {confirmAction.type === "block"
                 ? t("admin.confirmBlockDesc", { name: getConfirmEmail(confirmAction.user) })
                 : confirmAction.type === "unblock"
@@ -1110,24 +1133,20 @@ export default function AdminPage() {
             </p>
             {confirmAction.type === "block" && (
               <div className="mt-4">
-                <label className="block text-xs font-medium text-ink-500 dark:text-ink-400 mb-1">
-                  {t("admin.blockReason")}
-                </label>
-                <input
-                  type="text"
+                <Input
+                  label={t("admin.blockReason")}
                   value={blockReason}
                   onChange={(e) => setBlockReason(e.target.value)}
-                  className="input w-full"
                   placeholder={t("admin.blockReason")}
                   maxLength={255}
                 />
               </div>
             )}
             <div className="mt-6 flex justify-end gap-2">
-              <Button variant="ghost" onClick={closeConfirm} disabled={busy}>
+              <Button variant="ghost" onClick={closeConfirm} disabled={busy} isLoading={busy}>
                 {t("admin.cancel")}
               </Button>
-              <Button variant={confirmAction.type === "delete" ? "danger" : "primary"} onClick={confirmExecute} disabled={busy}>
+              <Button variant={confirmAction.type === "delete" ? "danger" : "primary"} onClick={confirmExecute} disabled={busy} isLoading={busy}>
                 {t("admin.yes")}
               </Button>
             </div>
@@ -1136,4 +1155,8 @@ export default function AdminPage() {
       )}
     </div>
   );
+}
+
+function getConfirmEmail(user: AdminUser | BlockedUser): string {
+  return "user_email" in user ? user.user_email : user.email;
 }

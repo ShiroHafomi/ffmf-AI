@@ -130,7 +130,7 @@ export default function InsightsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 animate-fade-in">
+    <div className="mx-auto max-w-6xl space-y-6 fade-in">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>

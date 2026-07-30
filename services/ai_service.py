@@ -23,8 +23,14 @@ holt_winters_forecast.
 import logging
 import os
 import re
-
 import json
+import subprocess
+import hashlib
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
 import numpy as np
 from dotenv import load_dotenv
 from sklearn.linear_model import LinearRegression
@@ -37,6 +43,162 @@ from services.rag_retriever import (
 from services.thinking_log import thinking_log
 
 logger = logging.getLogger("ffms")
+
+# ───────────────────────── Structured Prediction Logging ─────────────────────────
+# Log directory
+_LOG_DIR = Path(__file__).parent.parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+_PREDICTION_LOG_FILE = _LOG_DIR / "ai_predictions.jsonl"
+_ADMIN_AI_ACCESS_LOG_FILE = _LOG_DIR / "admin_ai_access.jsonl"
+
+# Per-process cache for ensemble weights
+_ensemble_weights_cache: dict[tuple, dict] = {}
+
+
+def log_prediction(
+    household_id: int,
+    forecast_dict: dict,
+    method: str,
+    latency_ms: float,
+) -> None:
+    """Write structured prediction log to JSONL file.
+
+    Args:
+        household_id: The household ID
+        forecast_dict: The forecast result dict from predict_next_month/rag_predict
+        method: The forecasting method used
+        latency_ms: Prediction latency in milliseconds
+    """
+    try:
+        record = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "household_id": household_id,
+            "predicted": forecast_dict.get("predicted"),
+            "last_month": forecast_dict.get("last_month"),
+            "method": method,
+            "confidence": forecast_dict.get("confidence"),
+            "interval": forecast_dict.get("interval"),
+            "latency_ms": round(latency_ms, 2),
+            "model_version": get_model_version(),
+        }
+        with open(_PREDICTION_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        # Logging failure must never break the prediction path
+        logger.warning("Failed to write prediction log: %s", e)
+
+
+def log_admin_ai_access(
+    admin_id: int,
+    household_id: int,
+    endpoint: str,
+    status: str,
+) -> None:
+    """Write admin AI access audit log to JSONL file."""
+    try:
+        record = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "admin_id": admin_id,
+            "household_id": household_id,
+            "endpoint": endpoint,
+            "status": status,
+        }
+        with open(_ADMIN_AI_ACCESS_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning("Failed to write admin AI access log: %s", e)
+
+
+def get_model_version() -> str:
+    """Return model version string including git SHA and config hash.
+
+    Returns:
+        Version string in format "git:<sha>|cfg:<hash>"
+    """
+    # Get git short SHA
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).parent.parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        git_sha = "unknown"
+
+    # Config hash from key environment variables
+    config_parts = [
+        os.getenv("LLM_PROVIDER", "deterministic"),
+        os.getenv("ANTHROPIC_MODEL", ""),
+        str(os.getenv("RAG_TOP_K", "4")),
+        os.getenv("LLM_BASE_URL", ""),
+        os.getenv("LLM_MODEL", ""),
+    ]
+    config_hash = hashlib.sha256("|".join(config_parts).encode()).hexdigest()[:8]
+
+    version_string = f"git:{git_sha}|cfg:{config_hash}"
+    return version_string
+
+
+def get_model_version_detail() -> dict:
+    """Return detailed model version info including git SHA and config hash.
+
+    Returns:
+        dict with keys: git_sha, config_hash, version_string
+    """
+    # Get git short SHA
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).parent.parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        git_sha = "unknown"
+
+    # Config hash from key environment variables
+    config_parts = [
+        os.getenv("LLM_PROVIDER", "deterministic"),
+        os.getenv("ANTHROPIC_MODEL", ""),
+        str(os.getenv("RAG_TOP_K", "4")),
+        os.getenv("LLM_BASE_URL", ""),
+        os.getenv("LLM_MODEL", ""),
+    ]
+    config_hash = hashlib.sha256("|".join(config_parts).encode()).hexdigest()[:8]
+
+    version_string = f"git:{git_sha}|cfg:{config_hash}"
+
+    return {
+        "git_sha": git_sha,
+        "config_hash": config_hash,
+        "version_string": version_string,
+    }
+
+    return {
+        "git_sha": git_sha,
+        "config_hash": config_hash,
+        "version_string": version_string,
+    }
+
+
+def get_ensemble_weights_cache_key(data: list[dict], amount_key: str) -> tuple:
+    """Generate a cache key for ensemble weights based on data characteristics."""
+    totals = tuple(sorted(float(r.get(amount_key, 0)) for r in data))
+    return (amount_key, len(data), totals[:10])  # Use first 10 values for key
+
+
+def get_cached_ensemble_weights(data: list[dict], amount_key: str) -> Optional[dict]:
+    """Get cached ensemble weights if available."""
+    key = get_ensemble_weights_cache_key(data, amount_key)
+    return _ensemble_weights_cache.get(key)
+
+
+def set_cached_ensemble_weights(data: list[dict], amount_key: str, weights: dict) -> None:
+    """Cache ensemble weights for reuse."""
+    key = get_ensemble_weights_cache_key(data, amount_key)
+    _ensemble_weights_cache[key] = weights
+
 
 # Lazy import for currency helpers (avoids circular import)
 def _get_currency_helpers():
@@ -717,7 +879,46 @@ def ensemble_forecast(
     The final prediction is a weighted average of each model's forecast,
     where the weights are proportional to their wisdom scores.
     Returns (prediction, method_label, per_model_scores).
+
+    Ensemble weights are cached per-process keyed by data characteristics
+    to avoid recomputing on every request.
     """
+    # Check cache first
+    cached = get_cached_ensemble_weights(data, amount_key)
+    if cached is not None:
+        totals = [float(r.get(amount_key, 0)) for r in data]
+        n = len(totals)
+        if n >= 2:
+            # Recompute predictions with cached weights
+            candidates: list[tuple[str, float, float]] = []
+            try:
+                lr_pred = linear_regression_predict(data, amount_key)
+                candidates.append(("linear_regression", lr_pred, cached.get("linear_regression", 0)))
+            except Exception:
+                pass
+            try:
+                holt_pred = holt_forecast(totals)
+                candidates.append(("holt", holt_pred, cached.get("holt", 0)))
+            except Exception:
+                pass
+            try:
+                hw_pred = holt_winters_forecast(totals)
+                candidates.append(("holt_winters", hw_pred, cached.get("holt_winters", 0)))
+            except Exception:
+                pass
+
+            if candidates:
+                weights = np.array([cached.get(name, 0) for name, _, _ in candidates], dtype=float)
+                if weights.max() > 0:
+                    weights = weights / weights.sum()
+                preds = np.array([p for _, p, _ in candidates], dtype=float)
+                ensemble_pred = float(np.average(preds, weights=weights))
+                best_name = candidates[int(np.argmax(weights))][0]
+                label = "ensemble" if len(candidates) > 1 else f"ensemble_{best_name}"
+                per_model = {name: round(float(score), 4) for name, _, score in candidates}
+                return round(ensemble_pred, 2), label, per_model
+
+    # Cache miss - compute normally
     totals = [float(r.get(amount_key, 0)) for r in data]
     n = len(totals)
 
@@ -780,6 +981,10 @@ def ensemble_forecast(
         label = f"ensemble_{best_name}"
 
     per_model = {name: round(float(sc), 4) for name, _, sc in candidates}
+
+    # Cache the weights for reuse
+    set_cached_ensemble_weights(data, amount_key, per_model)
+
     thinking_log.log(
         step="ensemble_forecast",
         category="model_selection",
@@ -796,6 +1001,27 @@ def ensemble_forecast(
     )
 
     return round(ensemble_pred, 2), label, per_model
+
+
+# ───────────────────────── Ensemble weights cache (per-process) ──────────────────
+# Populated lazily on first ensemble_forecast call for a given (len, pattern) key.
+_ensemble_weights_cache: dict[tuple, dict] = {}
+
+
+def _ensemble_cache_key(data: list[dict], amount_key: str) -> tuple:
+    """Generate cache key from data characteristics."""
+    totals = tuple(float(r.get(amount_key, 0)) for r in data)
+    return (amount_key, len(totals), totals[:5])  # key by length + first 5 values
+
+
+def get_cached_ensemble_weights(data: list[dict], amount_key: str) -> dict | None:
+    """Get cached ensemble weights if available."""
+    return _ensemble_weights_cache.get(_ensemble_cache_key(data, amount_key))
+
+
+def set_cached_ensemble_weights(data: list[dict], amount_key: str, weights: dict) -> None:
+    """Cache ensemble weights for reuse across requests."""
+    _ensemble_weights_cache[_ensemble_cache_key(data, amount_key)] = weights
 
 
 # ───────────────────────── Trend-strength detection ─────────────────────────
@@ -1063,6 +1289,8 @@ def _rag_fallback(
         },
     )
 
+    model_version = get_model_version()
+
     return {
         "predicted": pred,
         "interval": interval,
@@ -1070,6 +1298,7 @@ def _rag_fallback(
         "suggestions": suggestions,
         "confidence": confidence,
         "method": method,
+        "model_version": model_version,
     }
 
 
@@ -1134,6 +1363,8 @@ def _finalize_rag(inp, data, amount_key, reason) -> dict:
 
     interval = _prediction_interval(recent, predicted, confidence)
 
+    model_version = get_model_version()
+
     return {
         "predicted": round(predicted, 2),
         "interval": interval,
@@ -1141,6 +1372,7 @@ def _finalize_rag(inp, data, amount_key, reason) -> dict:
         "suggestions": [str(s) for s in suggestions[:3]],
         "confidence": confidence,
         "method": "rag",
+        "model_version": model_version,
     }
 
 
@@ -1447,15 +1679,16 @@ def rag_predict(
         output={"path": provider},
     )
 
+    start_time = time.perf_counter()
+
     # Default & recommended: deterministic forecast, retrieval-enriched tips.
     if provider == "deterministic":
-        return _rag_fallback(data, amount_key, "", retrieved)
-
+        result = _rag_fallback(data, amount_key, "", retrieved)
     # Opt-in paid Claude.
-    if provider == "anthropic":
+    elif provider == "anthropic":
         anthropic_key = _CONFIG["anthropic_api_key"]
         if anthropic_key:
-            return _rag_predict_anthropic(
+            result = _rag_predict_anthropic(
                 data,
                 amount_key,
                 category_context,
@@ -1464,33 +1697,50 @@ def rag_predict(
                 anthropic_key,
                 retrieved,
             )
-        return _rag_fallback(
-            data,
-            amount_key,
-            "Claude opted-in but ANTHROPIC_API_KEY not set.",
-            retrieved,
-        )
-
+        else:
+            result = _rag_fallback(
+                data,
+                amount_key,
+                "Claude opted-in but ANTHROPIC_API_KEY not set.",
+                retrieved,
+            )
     # Opt-in free cloud LLM (Groq/Together/OpenRouter/Ollama).
-    if provider == "openai-compatible":
+    elif provider == "openai-compatible":
         if _CONFIG["openai_base_url"] and _CONFIG["openai_model"]:
-            return _rag_predict_openai_compatible(
+            result = _rag_predict_openai_compatible(
                 data, amount_key, category_context, budget, kind, retrieved
             )
-        return _rag_fallback(
+        else:
+            result = _rag_fallback(
+                data,
+                amount_key,
+                "LLM not configured (using deterministic forecast).",
+                retrieved,
+            )
+    # Unknown provider -> deterministic (safe default).
+    else:
+        result = _rag_fallback(
             data,
             amount_key,
-            "LLM not configured (using deterministic forecast).",
+            f"Unknown LLM_PROVIDER '{provider}'; using deterministic forecast.",
             retrieved,
         )
 
-    # Unknown provider -> deterministic (safe default).
-    return _rag_fallback(
-        data,
-        amount_key,
-        f"Unknown LLM_PROVIDER '{provider}'; using deterministic forecast.",
-        retrieved,
-    )
+    # Ensure model_version is present
+    if "model_version" not in result:
+        result["model_version"] = get_model_version()
+
+    # Log prediction if household_id provided
+    if household_id is not None:
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        log_prediction(
+            household_id=household_id,
+            forecast_dict=result,
+            method=result.get("method", "unknown"),
+            latency_ms=latency_ms,
+        )
+
+    return result
 
 
 def predict_next_month(

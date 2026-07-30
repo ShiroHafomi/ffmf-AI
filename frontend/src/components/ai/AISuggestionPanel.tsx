@@ -4,8 +4,7 @@ import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useToast } from "@/components/feedback/Toast";
-import { Button, Card } from "@/components/ui";
-import { Icon } from "@/components/ui/Icon";
+import { Button, Card, CardHeader, CardContent, Icon, Badge } from "@/components/ui";
 import type { ActionRow, CutbackLever, AlertRow } from "@/context/HouseholdDataContext";
 
 interface AISuggestion {
@@ -16,14 +15,21 @@ interface AISuggestion {
   category: "saving" | "budget" | "spending" | "goal" | "tip";
 }
 
-const categoryIcons = {
-  saving: "trendDown",
-  budget: "target",
-  spending: "receipt",
-  goal: "spark",
-  tip: "bulb",
-} as const;
+const CATEGORY_ICONS = {
+  saving: "trendDown" as const,
+  budget: "target" as const,
+  spending: "receipt" as const,
+  goal: "spark" as const,
+  tip: "bulb" as const,
+};
 
+/**
+ * AI-powered suggestions panel.
+ *
+ * Fetches `GET /api/insights/:householdId` (Node proxy → FastAPI) via
+ * `authFetch` and maps four data sources into a unified suggestion list.
+ * Manual refresh — does NOT auto-load.
+ */
 export function AISuggestionPanel({
   householdId,
   onRefresh,
@@ -45,18 +51,13 @@ export function AISuggestionPanel({
     }
     setLoading(true);
     try {
-      const res = await authFetch(`/api/insights/${householdId}`, {
-        method: "GET",
-      });
+      const res = await authFetch(`/api/insights/${householdId}`, { method: "GET" });
       if (!res.ok) throw new Error("Failed to fetch insights");
       const data = (res.data ?? {}) as {
         cutback_suggestions?: { levers?: CutbackLever[] };
         recommended_actions?: ActionRow[];
-        predictions?: {
-          expense?: { suggestions?: string[] };
-        };
+        predictions?: { expense?: { suggestions?: string[] } };
         alert_thresholds?: { result?: { alerts?: AlertRow[] } };
-        savings?: { tip?: string };
       };
 
       const levers = data.cutback_suggestions?.levers ?? [];
@@ -64,7 +65,7 @@ export function AISuggestionPanel({
       const predSuggestions = data.predictions?.expense?.suggestions ?? [];
       const alerts = data.alert_thresholds?.result?.alerts ?? [];
 
-      const mapped: AISuggestion[] = [
+      setSuggestions([
         ...levers.map((l) => ({
           id: `cutback-${l.id ?? l.lever}`,
           title: `Reduce ${l.lever} spending`,
@@ -81,7 +82,7 @@ export function AISuggestionPanel({
         })),
         ...predSuggestions.map((s, i) => ({
           id: `pred-${i}`,
-          title: "Forecast tip",
+          title: t("dash.suggestions.tip"),
           description: s,
           priority: "medium" as const,
           category: "tip" as const,
@@ -93,16 +94,20 @@ export function AISuggestionPanel({
           priority: a.severity === "high" ? ("high" as const) : ("medium" as const),
           category: "budget" as const,
         })),
-      ];
+      ]);
 
-      setSuggestions(mapped);
       if (onRefresh) await onRefresh();
-      toast.success(t("toast.insightsRefreshed") || "Suggestions refreshed");
+      toast.success(t("toast.insightsRefreshed"));
     } catch {
-      toast.error(t("common.loading") || "Failed to generate suggestions");
+      toast.error(t("aiChat.error"));
     } finally {
       setLoading(false);
     }
+  }
+
+  function dismiss(id: string) {
+    setSuggestions((prev) => prev.filter((s) => s.id !== id));
+    setExpanded((prev) => (prev === id ? null : prev));
   }
 
   function toggleExpand(id: string) {
@@ -110,111 +115,91 @@ export function AISuggestionPanel({
   }
 
   return (
-    <Card className="card-pad card-hover border-l-4 border-l-brand-500 bg-gradient-to-br from-brand-50/50 to-surface dark:from-brand-soft/10 dark:to-surface">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl brand-gradient text-white shadow-pop">
-            <Icon name="spark" className="h-5 w-5" />
-          </span>
-          <div>
-            <h3 className="text-base font-semibold text-ink-900 dark:text-ink-50">
-              {t("dash.aiSuggestions")}
-            </h3>
-            <p className="text-xs text-ink-500 dark:text-ink-400">
-              {t("dash.aiSuggestionsSub")}
-            </p>
-          </div>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={generateSuggestions}
-          disabled={loading}
-          className="gap-2"
-        >
-          {loading ? (
-            <>
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-300 border-t-brand-600" />
-              {t("dash.suggestions.loading")}
-            </>
-          ) : (
-            <>
-              <Icon name="refreshCw" className="h-4 w-4" />
-              {t("dash.suggestions.refresh")}
-            </>
-          )}
-        </Button>
-      </div>
+    <Card variant="glass" className="fade-in-up">
+      <CardHeader
+        title={t("dash.aiSuggestions")}
+        subtitle={t("dash.aiSuggestionsSub")}
+        icon={<Icon name="bulb" className="h-5 w-5" />}
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={generateSuggestions}
+            isLoading={loading}
+          >
+            {!loading && <Icon name="refreshCw" className="h-4 w-4" />}
+            {t("dash.suggestions.refresh")}
+          </Button>
+        }
+      />
 
-      <div className="mt-4 space-y-3">
+      <CardContent className="space-y-3 stagger">
         {suggestions.length === 0 && !loading && (
-          <p className="text-sm text-ink-400 dark:text-ink-500">
-            {t("dash.suggestions.noData")}
-          </p>
+          <p className="text-sm text-muted">{t("dash.suggestions.noData")}</p>
         )}
 
         {suggestions.map((suggestion) => (
           <div
             key={suggestion.id}
-            className="rounded-xl border border-ink-200 dark:border-ink-700 bg-surface/60 p-4 transition hover:bg-surface"
+            className="rounded-xl border border-border bg-surface/60 p-4 transition hover:bg-surface"
           >
             <div
-              className="flex items-start justify-between gap-3 cursor-pointer"
+              className="flex cursor-pointer items-start justify-between gap-3"
               onClick={() => toggleExpand(suggestion.id)}
+              role="button"
+              aria-expanded={expanded === suggestion.id}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleExpand(suggestion.id);
+                }
+              }}
             >
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <Icon
-                    name={categoryIcons[suggestion.category]}
+                    name={CATEGORY_ICONS[suggestion.category]}
                     className="h-4 w-4 text-brand-600 dark:text-brand-400"
                   />
-                  <h4 className="text-sm font-semibold text-ink-800 dark:text-ink-100">
-                    {suggestion.title}
-                  </h4>
+                  <h4 className="text-sm font-semibold text-text">{suggestion.title}</h4>
                 </div>
-                <p className="mt-1 text-xs text-ink-500 dark:text-ink-400 line-clamp-2">
-                  {suggestion.description}
-                </p>
+                <p className="mt-1 line-clamp-2 text-xs text-muted">{suggestion.description}</p>
               </div>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+              <Badge
+                tone={
                   suggestion.priority === "high"
-                    ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"
+                    ? "danger"
                     : suggestion.priority === "medium"
-                    ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-                    : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
-                }`}
+                      ? "warning"
+                      : "success"
+                }
+                size="sm"
               >
                 {suggestion.priority}
-              </span>
+              </Badge>
             </div>
 
             {expanded === suggestion.id && (
-              <div className="mt-3 pt-3 border-t border-ink-100 dark:border-ink-800">
-                <p className="text-sm text-ink-600 dark:text-ink-300">
-                  {suggestion.description}
-                </p>
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="text-sm text-muted">{suggestion.description}</p>
                 <div className="mt-3 flex gap-2">
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={() =>
-                      toast.success(
-                        "Action saved — we&apos;ll track your progress!"
-                      )
-                    }
+                    onClick={() => toast.success(t("dash.suggestions.action"))}
                   >
                     {t("dash.suggestions.action")}
                   </Button>
-                  <Button variant="ghost" size="sm">
-                    Dismiss
+                  <Button variant="ghost" size="sm" onClick={() => dismiss(suggestion.id)}>
+                    {t("common.dismiss")}
                   </Button>
                 </div>
               </div>
             )}
           </div>
         ))}
-      </div>
+      </CardContent>
     </Card>
   );
 }

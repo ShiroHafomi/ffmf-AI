@@ -112,7 +112,7 @@ export function NotificationBell() {
         aria-label={t("notifications.title") ?? "Notifications"}
         aria-expanded={open}
         aria-haspopup="true"
-        className="relative"
+        className="relative min-h-[44px] min-w-[44px]"
       >
         <Icon name="bell" className="h-5 w-5" />
         {unreadCount > 0 && (
@@ -125,7 +125,7 @@ export function NotificationBell() {
       {/* Dropdown panel */}
       {open && (
         <div
-          className="absolute right-0 mt-2 w-80 origin-top-right rounded-xl border border-border bg-surface shadow-float animate-fade-in z-popover"
+          className="absolute right-0 mt-2 w-80 origin-top-right rounded-xl border border-border bg-surface shadow-float fade-in z-tooltip"
           role="menu"
         >
           {/* Header */}

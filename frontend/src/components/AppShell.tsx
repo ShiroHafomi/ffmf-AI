@@ -6,7 +6,6 @@ import { useAuth } from "@/context/AuthContext";
 import { useHouseholdData } from "@/context/HouseholdDataContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { roleLabel, useCan } from "@/lib/permissions";
-import { initials } from "@/lib/format";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import ThemeToggle from "@/components/ThemeToggle";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -168,7 +167,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={openCommandPalette}
                 title={t("cmd.open")}
                 className={cn(
-                  "hidden items-center gap-2 rounded-xl border border-border bg-surface px-3 py-1.5",
+                  "hidden items-center gap-2 rounded-xl border border-border bg-surface px-3 py-1.5 min-h-[44px] min-w-[44px]",
                   "text-xs font-medium text-muted transition-colors",
                   "hover:bg-surface-hover hover:text-text sm:inline-flex"
                 )}
@@ -188,7 +187,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 onClick={openCommandPalette}
                 className={cn(
-                  "grid h-9 w-9 place-items-center rounded-xl border border-border bg-surface",
+                  "grid h-9 w-9 min-h-[44px] min-w-[44px] place-items-center rounded-xl border border-border bg-surface",
                   "text-muted sm:hidden"
                 )}
                 aria-label={t("cmd.open")}

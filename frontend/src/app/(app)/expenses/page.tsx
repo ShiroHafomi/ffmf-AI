@@ -272,7 +272,7 @@ export default function ExpensesPage() {
       <div
         className={cn(
           "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between",
-          mounted ? "animate-fade-in-up" : "opacity-0"
+          mounted ? "fade-in-up" : "opacity-0"
         )}
       >
         <div>
@@ -396,7 +396,7 @@ export default function ExpensesPage() {
         <div className="space-y-6 lg:col-span-2">
           {/* Add Expense Form */}
           {showAddForm && (
-            <div {...staggerDelay(1, 100)} className="animate-fade-in-up">
+            <div {...staggerDelay(1, 100)} className="fade-in-up">
               <Card variant="glass">
                 <CardHeader
                   title={t("exp.addExpense")}
@@ -563,7 +563,7 @@ export default function ExpensesPage() {
                       <li
                         key={x.id}
                         {...staggerDelay(idx, 50)}
-                        className="flex items-center justify-between p-4 hover:bg-muted/30 dark:hover:bg-muted/20 transition-colors animate-fade-in"
+                        className="flex items-center justify-between p-4 hover:bg-muted/30 dark:hover:bg-muted/20 transition-colors fade-in"
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div
@@ -659,7 +659,7 @@ export default function ExpensesPage() {
                       <li
                         key={c.name}
                         {...staggerDelay(idx, 50)}
-                        className="animate-fade-in-up"
+                        className="fade-in-up"
                       >
                         <div className="mb-2 flex items-center justify-between">
                           <span className="font-medium text-text">{c.name}</span>

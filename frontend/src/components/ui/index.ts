@@ -10,3 +10,5 @@ export { Button } from "./Button";
 export { Input } from "./Input";
 export { Select, type SelectOption } from "./Select";
 export { Avatar, AvatarGroup } from "./Avatar";
+export { Tabs, Tab } from "./Tabs";
+export { Dropdown, DropdownTrigger } from "./Dropdown";
