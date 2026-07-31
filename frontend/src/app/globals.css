@@ -529,7 +529,19 @@
   }
 
   .btn:active:not(:disabled) {
-    transform: scale(0.98);
+    transform: scale(0.97);
+    transition: transform 80ms var(--ease-out), background-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
+  }
+
+  .btn:focus-visible {
+    animation: ffms-btn-focus 0.4s var(--ease-out);
+  }
+
+  @keyframes ffms-btn-focus {
+    0% { box-shadow: var(--focus-ring); }
+    60% { box-shadow: none; }
+    100% { box-shadow: var(--focus-ring); }
   }
 
   .btn:disabled {
@@ -1527,66 +1539,184 @@
 
 /* ── Utilities layer ──────────────────────────────────────────── */
 @layer utilities {
-  /* Animations */
+  /* ═══════════════════════════════════════════════════════════
+     Animations — FFMS Design System
+     Durations:   fast=150ms  base=200ms  slow=300ms
+     Performance: transform + opacity only (no layout triggers)
+     Respects:   prefers-reduced-motion
+     ═══════════════════════════════════════════════════════════ */
+
+  /* ── Enter: subtle fade + micro-rise ───────────────────── */
   .fade-in {
     animation: ffms-fade 0.25s var(--ease-out) both;
   }
 
   @keyframes ffms-fade {
     from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
+  /* ── Enter: stronger rise (banners, sections) ──────────── */
   .fade-in-up {
     animation: ffms-rise 0.45s var(--ease-out) both;
   }
 
   @keyframes ffms-rise {
     from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
+  /* ── Enter: descend from above (dropdowns, alerts) ─────── */
+  .fade-in-down {
+    animation: ffms-drop 0.25s var(--ease-out) both;
+  }
+
+  @keyframes ffms-drop {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Enter: slide from right (drawers, modals) ─────────── */
   .slide-in-right {
     animation: ffms-slide-right 0.3s var(--ease-out) both;
   }
 
   @keyframes ffms-slide-right {
     from { opacity: 0; transform: translateX(16px); }
-    to { opacity: 1; transform: translateX(0); }
+    to   { opacity: 1; transform: translateX(0); }
   }
 
+  /* ── Enter: slide from left (mobile nav) ───────────────── */
   .slide-in-left {
     animation: ffms-slide-left 0.3s var(--ease-out) both;
   }
 
   @keyframes ffms-slide-left {
     from { opacity: 0; transform: translateX(-16px); }
-    to { opacity: 1; transform: translateX(0); }
+    to   { opacity: 1; transform: translateX(0); }
   }
 
+  /* ── Enter: slide from bottom (sheets, notifications) ──── */
+  .slide-in-bottom {
+    animation: ffms-slide-bottom 0.3s var(--ease-out) both;
+  }
+
+  @keyframes ffms-slide-bottom {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Enter: scale pop (dialogs, menus, tooltips) ───────── */
   .scale-in {
     animation: ffms-scale 0.2s var(--ease-out) both;
   }
 
   @keyframes ffms-scale {
     from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
+    to   { opacity: 1; transform: scale(1); }
   }
 
-  /* Stagger */
+  /* ── Enter: bouncy pop (success checks, badges) ────────── */
+  .bounce-enter {
+    animation: ffms-bounce 0.4s var(--ease-out) both;
+  }
+
+  @keyframes ffms-bounce {
+    0%   { opacity: 0; transform: scale(0.6); }
+    60%  { opacity: 1; transform: scale(1.15); }
+    80%  { transform: scale(0.95); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  /* ── Stagger: cascade children with variable delay ─────── */
   .stagger > * {
     animation: ffms-rise 0.45s var(--ease-out) both;
     animation-delay: calc(var(--i, 0) * 70ms);
   }
 
-  /* Motion reduction */
+  /* ── Hover: subtle scale on interactive cards ──────────── */
+  .scale-hover {
+    transition: transform var(--duration-fast) var(--ease-out),
+                box-shadow var(--duration-fast) var(--ease-out);
+  }
+  .scale-hover:hover {
+    transform: translateY(-1px) scale(1.01);
+    box-shadow: var(--shadow-card);
+  }
+  .scale-hover:active {
+    transform: translateY(0) scale(0.99);
+  }
+
+  /* ── Press: active feedback for buttons / chips ────────── */
+  .press-down:not(:disabled) {
+    transition: transform 120ms var(--ease-out), opacity 120ms var(--ease-out);
+  }
+  .press-down:active:not(:disabled) {
+    transform: scale(0.97);
+    opacity: 0.85;
+  }
+
+  /* ── Border glow pulse (highlight rings) ───────────────── */
+  .border-glow {
+    animation: ffms-border-pulse 2s var(--ease-in-out) infinite;
+  }
+
+  @keyframes ffms-border-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0.4); }
+    50%      { box-shadow: 0 0 0 4px rgb(245 158 11 / 0); }
+  }
+
+  /* ── Shimmer text (subtle loading / brand emphasis) ───────── */
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      var(--text)             0%,
+      var(--brand)           40%,
+      var(--brand)           60%,
+      var(--text)           100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: ffms-shimmer-text 2.5s linear infinite;
+  }
+
+  @keyframes ffms-shimmer-text {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ── Shake (validation error) ──────────────────────────── */
+  .shake {
+    animation: ffms-shake 0.4s var(--ease-out) both;
+  }
+
+  @keyframes ffms-shake {
+    0%, 100% { transform: translateX(0); }
+    15%      { transform: translateX(-6px); }
+    30%      { transform: translateX(6px); }
+    45%      { transform: translateX(-4px); }
+    60%      { transform: translateX(4px); }
+    75%      { transform: translateX(-2px); }
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     Motion reduction — respect OS accessibility setting
+     ═══════════════════════════════════════════════════════════ */
   @media (prefers-reduced-motion: reduce) {
     .skeleton::after,
     .fade-in,
     .fade-in-up,
+    .fade-in-down,
     .slide-in-right,
     .slide-in-left,
+    .slide-in-bottom,
     .scale-in,
+    .bounce-enter,
+    .border-glow,
+    .shimmer-text,
+    .shake,
     .stagger > *,
     .toast,
     .modal-overlay,
@@ -1596,6 +1726,8 @@
     }
 
     .card-hover:hover { transform: none; }
+    .scale-hover:hover { transform: none; box-shadow: none; }
+    .press-down:active:not(:disabled) { transform: none; opacity: 1; }
     .btn:active:not(:disabled) { transform: none; }
   }
 
